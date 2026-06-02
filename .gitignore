@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+frontend/.vite/
+frontend/vite.config.js
+frontend/vite.config.d.ts
+backend/generated/
