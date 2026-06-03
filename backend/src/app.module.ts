@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { IdentityModule } from './identity/identity.module';
+import { MasterDataModule } from './master-data/master-data.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -11,6 +13,8 @@ import { PrismaModule } from './prisma/prisma.module';
       envFilePath: ['../.env.local', '../.env', '.env'],
     }),
     PrismaModule,
+    IdentityModule,
+    MasterDataModule,
   ],
   controllers: [AppController],
   providers: [AppService],

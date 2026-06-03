@@ -16,3 +16,169 @@ model SystemSetting {
 
   @@map("system_settings")
 }
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum RoleStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum MasterDataStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DataScopeType {
+  ALL
+  OWN_DEPARTMENT
+  OWN
+  CUSTOM
+}
+
+model User {
+  id             String             @id @default(cuid())
+  employeeNo     String             @unique @map("employee_no")
+  email          String             @unique
+  name           String
+  passwordHash   String             @map("password_hash")
+  status         UserStatus         @default(ACTIVE)
+  departmentId   String?            @map("department_id")
+  costCenterId   String?            @map("cost_center_id")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  deletedAt      DateTime?          @map("deleted_at")
+  department     Department?        @relation(fields: [departmentId], references: [id])
+  costCenter     CostCenter?        @relation(fields: [costCenterId], references: [id])
+  roles          UserRole[]
+
+  @@map("iam_users")
+}
+
+model Role {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  name        String
+  description String?
+  status      RoleStatus      @default(ACTIVE)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  deletedAt   DateTime?       @map("deleted_at")
+  users       UserRole[]
+  permissions RolePermission[]
+  dataScopes  DataScope[]
+
+  @@map("iam_roles")
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  name        String
+  description String?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  roles       RolePermission[]
+
+  @@map("iam_permissions")
+}
+
+model UserRole {
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+  role      Role     @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@map("iam_user_roles")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@map("iam_role_permissions")
+}
+
+model DataScope {
+  id           String        @id @default(cuid())
+  roleId       String        @map("role_id")
+  resource     String
+  scopeType    DataScopeType @map("scope_type")
+  departmentId String?       @map("department_id")
+  costCenterId String?       @map("cost_center_id")
+  projectId    String?       @map("project_id")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  role         Role          @relation(fields: [roleId], references: [id])
+  department   Department?   @relation(fields: [departmentId], references: [id])
+  costCenter   CostCenter?   @relation(fields: [costCenterId], references: [id])
+  project      Project?      @relation(fields: [projectId], references: [id])
+
+  @@unique([roleId, resource])
+  @@map("iam_data_scopes")
+}
+
+model Department {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  name        String
+  parentId    String?          @map("parent_id")
+  status      MasterDataStatus @default(ACTIVE)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  deletedAt   DateTime?        @map("deleted_at")
+  parent      Department?      @relation("DepartmentTree", fields: [parentId], references: [id])
+  children    Department[]     @relation("DepartmentTree")
+  users       User[]
+  costCenters CostCenter[]
+  projects    Project[]
+  dataScopes  DataScope[]
+
+  @@map("md_departments")
+}
+
+model CostCenter {
+  id           String           @id @default(cuid())
+  code         String           @unique
+  name         String
+  departmentId String?          @map("department_id")
+  status       MasterDataStatus @default(ACTIVE)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  deletedAt    DateTime?        @map("deleted_at")
+  department   Department?      @relation(fields: [departmentId], references: [id])
+  users        User[]
+  projects     Project[]
+  dataScopes   DataScope[]
+
+  @@map("md_cost_centers")
+}
+
+model Project {
+  id           String           @id @default(cuid())
+  code         String           @unique
+  name         String
+  ownerUserId  String?          @map("owner_user_id")
+  departmentId String?          @map("department_id")
+  costCenterId String?          @map("cost_center_id")
+  status       MasterDataStatus @default(ACTIVE)
+  startsAt     DateTime?        @map("starts_at")
+  endsAt       DateTime?        @map("ends_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  deletedAt    DateTime?        @map("deleted_at")
+  department   Department?      @relation(fields: [departmentId], references: [id])
+  costCenter   CostCenter?      @relation(fields: [costCenterId], references: [id])
+  dataScopes   DataScope[]
+
+  @@map("md_projects")
+}

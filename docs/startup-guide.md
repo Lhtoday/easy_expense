@@ -42,6 +42,13 @@ npm.cmd run dev:backend
 http://localhost:3000/api/health
 ```
 
+Phase 1 默认管理员会在首次登录时自动初始化：
+
+```text
+邮箱：admin@expenseflow.local
+密码：Admin123!
+```
+
 ## 5. 启动前端
 
 另开一个 PowerShell 窗口：
@@ -56,6 +63,17 @@ npm.cmd run dev:frontend
 ```text
 http://localhost:5173
 ```
+
+Phase 1 登录后可访问的基础管理页面：
+
+- 用户
+- 角色
+- 权限
+- 部门
+- 成本中心
+- 项目
+
+其中，系统管理员可以在“权限”页面查看全部权限；在“角色”页面编辑角色时，可以通过权限弹窗批量勾选权限。
 
 ## 6. MinIO 控制台
 
@@ -110,3 +128,7 @@ docker-compose down
 ## Windows 注意事项
 
 在当前机器的 PowerShell 中，建议使用 `npm.cmd`，不要直接使用 `npm`。直接运行 `npm` 可能会被 PowerShell 执行策略拦截 `npm.ps1`。
+
+## 登录状态排查
+
+如果前端页面在登录页和登录后页面之间反复跳转，通常是浏览器本地保存了已失效的 `expenseflow_token`。当前前端会在 `/auth/me` 校验失败时自动清理失效 token；如果浏览器仍显示旧状态，可以强制刷新页面，或清理 `http://localhost:5173` 的 localStorage 后重新登录。
