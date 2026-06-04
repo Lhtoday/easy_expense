@@ -9,6 +9,8 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'md:cost-center:write', name: '维护成本中心' },
   { code: 'md:project:read', name: '查看项目' },
   { code: 'md:project:write', name: '维护项目' },
+  { code: 'exp:report:read', name: '查看报销单', description: '查看报销单列表和详情' },
+  { code: 'exp:report:write', name: '维护报销单', description: '创建、编辑、提交和作废报销单' },
 ];
 
 export interface AuthenticatedUser {

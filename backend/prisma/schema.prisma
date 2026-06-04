@@ -39,6 +39,19 @@ enum DataScopeType {
   CUSTOM
 }
 
+enum ExpenseReportStatus {
+  DRAFT
+  SUBMITTED
+  VOIDED
+}
+
+enum ExpenseReportAction {
+  CREATE
+  UPDATE
+  SUBMIT
+  VOID
+}
+
 model User {
   id             String             @id @default(cuid())
   employeeNo     String             @unique @map("employee_no")
@@ -54,6 +67,9 @@ model User {
   department     Department?        @relation(fields: [departmentId], references: [id])
   costCenter     CostCenter?        @relation(fields: [costCenterId], references: [id])
   roles          UserRole[]
+  createdReports ExpenseReport[]    @relation("ExpenseReportApplicant")
+  updatedReports ExpenseReport[]    @relation("ExpenseReportUpdater")
+  reportLogs     ExpenseReportLog[]
 
   @@map("iam_users")
 }
@@ -142,6 +158,8 @@ model Department {
   costCenters CostCenter[]
   projects    Project[]
   dataScopes  DataScope[]
+  expenseReports ExpenseReport[]
+  expenseItems   ExpenseReportItem[]
 
   @@map("md_departments")
 }
@@ -159,6 +177,8 @@ model CostCenter {
   users        User[]
   projects     Project[]
   dataScopes   DataScope[]
+  expenseReports ExpenseReport[]
+  expenseItems   ExpenseReportItem[]
 
   @@map("md_cost_centers")
 }
@@ -179,6 +199,85 @@ model Project {
   department   Department?      @relation(fields: [departmentId], references: [id])
   costCenter   CostCenter?      @relation(fields: [costCenterId], references: [id])
   dataScopes   DataScope[]
+  expenseReports ExpenseReport[]
+  expenseItems   ExpenseReportItem[]
 
   @@map("md_projects")
+}
+
+model ExpenseReport {
+  id                    String                @id @default(cuid())
+  reportNo              String                @unique @map("report_no")
+  title                 String
+  applicantId           String                @map("applicant_id")
+  departmentId          String?               @map("department_id")
+  costCenterId          String?               @map("cost_center_id")
+  projectId             String?               @map("project_id")
+  status                ExpenseReportStatus   @default(DRAFT)
+  currency              String                @default("CNY")
+  amountCents           Int                   @default(0) @map("amount_cents")
+  taxAmountCents        Int                   @default(0) @map("tax_amount_cents")
+  deductibleTaxCents    Int                   @default(0) @map("deductible_tax_cents")
+  reimbursableCents     Int                   @default(0) @map("reimbursable_cents")
+  paidAmountCents       Int                   @default(0) @map("paid_amount_cents")
+  submittedAt           DateTime?             @map("submitted_at")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+  deletedAt             DateTime?             @map("deleted_at")
+  applicant             User                  @relation("ExpenseReportApplicant", fields: [applicantId], references: [id])
+  updatedById           String?               @map("updated_by")
+  updatedBy             User?                 @relation("ExpenseReportUpdater", fields: [updatedById], references: [id])
+  department            Department?           @relation(fields: [departmentId], references: [id])
+  costCenter            CostCenter?           @relation(fields: [costCenterId], references: [id])
+  project               Project?              @relation(fields: [projectId], references: [id])
+  items                 ExpenseReportItem[]
+  logs                  ExpenseReportLog[]
+
+  @@index([applicantId, status])
+  @@index([departmentId])
+  @@index([costCenterId])
+  @@index([projectId])
+  @@map("exp_reports")
+}
+
+model ExpenseReportItem {
+  id                    String        @id @default(cuid())
+  reportId              String        @map("report_id")
+  occurredAt            DateTime      @map("occurred_at")
+  expenseTypeCode       String        @map("expense_type_code")
+  accountSubjectCode    String?       @map("account_subject_code")
+  description           String
+  departmentId          String?       @map("department_id")
+  costCenterId          String?       @map("cost_center_id")
+  projectId             String?       @map("project_id")
+  amountCents           Int           @map("amount_cents")
+  taxAmountCents        Int           @default(0) @map("tax_amount_cents")
+  deductibleTaxCents    Int           @default(0) @map("deductible_tax_cents")
+  reimbursableCents     Int           @map("reimbursable_cents")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+  report                ExpenseReport @relation(fields: [reportId], references: [id])
+  department            Department?   @relation(fields: [departmentId], references: [id])
+  costCenter            CostCenter?   @relation(fields: [costCenterId], references: [id])
+  project               Project?      @relation(fields: [projectId], references: [id])
+
+  @@index([reportId])
+  @@map("exp_report_items")
+}
+
+model ExpenseReportLog {
+  id          String              @id @default(cuid())
+  reportId    String              @map("report_id")
+  operatorId  String              @map("operator_id")
+  action      ExpenseReportAction
+  fromStatus  ExpenseReportStatus? @map("from_status")
+  toStatus    ExpenseReportStatus  @map("to_status")
+  comment     String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  report      ExpenseReport       @relation(fields: [reportId], references: [id])
+  operator    User                @relation(fields: [operatorId], references: [id])
+
+  @@index([reportId])
+  @@index([operatorId])
+  @@map("exp_report_logs")
 }

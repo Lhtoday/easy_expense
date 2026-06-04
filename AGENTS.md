@@ -62,6 +62,12 @@
 - 对接外部系统时，应记录接口协议、鉴权方式、回调幂等策略和失败补偿方案。
 - 任何临时方案必须标注原因、影响范围和后续移除条件。
 
+## Startup Operations
+
+- 当用户要求启动本项目、启动服务或检查本地运行状态时，必须先阅读并遵守 `docs/startup-guide.md`。
+- 启动顺序、环境变量、健康检查地址和默认登录信息以 `docs/startup-guide.md` 为准。
+- 不要在未查看启动文档的情况下自行推断前后端启动命令。
+
 ## Git Operations
 
 - 涉及本仓库提交、推送、远端检查或 Git 网络问题时，先阅读并遵守 `.codex/skills/expenseflow-git/SKILL.md`。

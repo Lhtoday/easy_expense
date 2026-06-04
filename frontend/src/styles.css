@@ -164,6 +164,49 @@ body {
   gap: 2px;
 }
 
+.expense-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.expense-total-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.expense-lines {
+  display: grid;
+  gap: 12px;
+}
+
+.expense-lines-toolbar,
+.expense-line-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.expense-line {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.expense-line-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 12px;
+  margin-top: 10px;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;
@@ -194,6 +237,11 @@ body {
   }
 
   .permission-check-list {
+    grid-template-columns: 1fr;
+  }
+
+  .expense-form-grid,
+  .expense-line-grid {
     grid-template-columns: 1fr;
   }
 }
