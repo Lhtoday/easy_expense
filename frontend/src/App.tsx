@@ -2,6 +2,7 @@ import {
   ApartmentOutlined,
   BankOutlined,
   DeleteOutlined,
+  EyeOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   KeyOutlined,
@@ -16,6 +17,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
   DatePicker,
+  Descriptions,
+  Divider,
   Form,
   Input,
   Layout,
@@ -93,6 +96,7 @@ interface ExpenseReportRecord {
   createdAt: string;
   submittedAt?: string | null;
   items?: ExpenseReportItemRecord[];
+  logs?: ExpenseReportLogRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -108,6 +112,16 @@ interface ExpenseReportItemRecord {
   taxAmountCents: number;
   deductibleTaxCents: number;
   reimbursableCents: number;
+}
+
+interface ExpenseReportLogRecord {
+  id: string;
+  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'VOID';
+  fromStatus?: ExpenseStatus | null;
+  toStatus: ExpenseStatus;
+  comment?: string | null;
+  createdAt: string;
+  operator: { id: string; name: string };
 }
 
 interface ExpenseFormValues {
@@ -168,6 +182,12 @@ const expenseTypeOptions = [
   { label: '其他', value: 'OTHER' },
 ];
 
+const expenseStatusOptions: Array<{ label: string; value: ExpenseStatus }> = [
+  { label: '草稿', value: 'DRAFT' },
+  { label: '已提交', value: 'SUBMITTED' },
+  { label: '已作废', value: 'VOIDED' },
+];
+
 function getToken() {
   return localStorage.getItem('expenseflow_token');
 }
@@ -191,8 +211,14 @@ export function App() {
   const [activeResource, setActiveResource] = useState<ResourceKey>('expense-reports');
   const [editing, setEditing] = useState<BaseRecord | null>(null);
   const [expenseEditing, setExpenseEditing] = useState<ExpenseReportRecord | null>(null);
+  const [expenseViewing, setExpenseViewing] = useState<ExpenseReportRecord | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [expenseDetailOpen, setExpenseDetailOpen] = useState(false);
+  const [expenseKeyword, setExpenseKeyword] = useState('');
+  const [expenseStatus, setExpenseStatus] = useState<ExpenseStatus | undefined>();
+  const [expensePage, setExpensePage] = useState(1);
+  const [expensePageSize, setExpensePageSize] = useState(10);
   const [form] = Form.useForm();
   const [expenseForm] = Form.useForm<ExpenseFormValues>();
   const queryClient = useQueryClient();
@@ -236,6 +262,7 @@ export function App() {
 
   const currentResource = resources.find((resource) => resource.key === activeResource) ?? resources[0];
   const canWrite = activeResource !== 'permissions' && (me?.permissions.includes(currentResource.writePermission) ?? false);
+  const canWithdrawExpense = me?.permissions.includes('exp:report:withdraw') ?? false;
 
   const listQuery = useQuery<PageResult<BaseRecord>>({
     queryKey: [activeResource],
@@ -260,11 +287,11 @@ export function App() {
   });
 
   const expenseListQuery = useQuery<PageResult<ExpenseReportRecord>>({
-    queryKey: ['expense-reports'],
+    queryKey: ['expense-reports', expensePage, expensePageSize, expenseKeyword, expenseStatus],
     queryFn: async () => {
       const response = await api.get<ApiResponse<PageResult<ExpenseReportRecord>>>('/expense-reports', {
         headers: authHeaders(),
-        params: { page: 1, pageSize: 50 },
+        params: { page: expensePage, pageSize: expensePageSize, keyword: expenseKeyword || undefined, status: expenseStatus },
       });
       return response.data.data;
     },
@@ -329,15 +356,30 @@ export function App() {
     mutationFn: async (id: string) => api.post(`/expense-reports/${id}/submit`, {}, { headers: authHeaders() }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      setExpenseDetailOpen(false);
+      setExpenseViewing(null);
       messageApi.success('报销单已提交');
     },
     onError: () => messageApi.error('提交失败，草稿需至少包含一条可报销金额大于 0 的明细'),
+  });
+
+  const withdrawExpenseMutation = useMutation({
+    mutationFn: async (id: string) => api.post(`/expense-reports/${id}/withdraw`, {}, { headers: authHeaders() }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      setExpenseDetailOpen(false);
+      setExpenseViewing(null);
+      messageApi.success('报销单已撤回，可继续编辑');
+    },
+    onError: () => messageApi.error('撤回失败，仅本人已提交且尚未进入审批处理的报销单可以撤回'),
   });
 
   const voidExpenseMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/expense-reports/${id}`, { headers: authHeaders() }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      setExpenseDetailOpen(false);
+      setExpenseViewing(null);
       messageApi.success('草稿已作废');
     },
     onError: () => messageApi.error('作废失败，仅草稿可以作废'),
@@ -377,6 +419,12 @@ export function App() {
     setExpenseEditing(detail);
     expenseForm.setFieldsValue(expenseToFormValues(detail));
     setExpenseModalOpen(true);
+  }
+
+  async function openExpenseDetail(record: ExpenseReportRecord) {
+    const response = await api.get<ApiResponse<ExpenseReportRecord>>(`/expense-reports/${record.id}`, { headers: authHeaders() });
+    setExpenseViewing(response.data.data);
+    setExpenseDetailOpen(true);
   }
 
   if (sessionToken && loadingMe) {
@@ -462,12 +510,31 @@ export function App() {
         <Content className="app-content">
           {activeResource === 'expense-reports' ? (
             <ExpenseReportsView
+              canWithdraw={canWithdrawExpense}
               canWrite={canWrite}
               data={expenseListQuery.data}
+              keyword={expenseKeyword}
               loading={expenseListQuery.isLoading}
+              page={expensePage}
+              pageSize={expensePageSize}
+              status={expenseStatus}
               onCreate={() => void openExpenseModal()}
               onEdit={(record) => void openExpenseModal(record)}
+              onPageChange={(page, pageSize) => {
+                setExpensePage(page);
+                setExpensePageSize(pageSize);
+              }}
+              onSearch={(keyword) => {
+                setExpenseKeyword(keyword.trim());
+                setExpensePage(1);
+              }}
+              onStatusChange={(status) => {
+                setExpenseStatus(status);
+                setExpensePage(1);
+              }}
               onSubmit={(record) => submitExpenseMutation.mutate(record.id)}
+              onView={(record) => void openExpenseDetail(record)}
+              onWithdraw={(record) => withdrawExpenseMutation.mutate(record.id)}
               onVoid={(record) => voidExpenseMutation.mutate(record.id)}
             />
           ) : (
@@ -512,6 +579,9 @@ export function App() {
         width={1080}
       >
         <ExpenseReportForm form={expenseForm} onFinish={(values) => saveExpenseMutation.mutate(values)} />
+      </Modal>
+      <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1080}>
+        {expenseViewing ? <ExpenseReportDetail record={expenseViewing} /> : null}
       </Modal>
     </Layout>
   );
@@ -559,26 +629,56 @@ function MasterDataView({
 }
 
 function ExpenseReportsView({
+  canWithdraw,
   canWrite,
   data,
+  keyword,
   loading,
+  page,
+  pageSize,
+  status,
   onCreate,
   onEdit,
+  onPageChange,
+  onSearch,
+  onStatusChange,
   onSubmit,
+  onView,
+  onWithdraw,
   onVoid,
 }: {
+  canWithdraw: boolean;
   canWrite: boolean;
   data?: PageResult<ExpenseReportRecord>;
+  keyword: string;
   loading: boolean;
+  page: number;
+  pageSize: number;
+  status?: ExpenseStatus;
   onCreate: () => void;
   onEdit: (record: ExpenseReportRecord) => void;
+  onPageChange: (page: number, pageSize: number) => void;
+  onSearch: (keyword: string) => void;
+  onStatusChange: (status?: ExpenseStatus) => void;
   onSubmit: (record: ExpenseReportRecord) => void;
+  onView: (record: ExpenseReportRecord) => void;
+  onWithdraw: (record: ExpenseReportRecord) => void;
   onVoid: (record: ExpenseReportRecord) => void;
 }) {
   return (
     <>
       <div className="table-toolbar">
-        <Input.Search placeholder="搜索单号或标题" />
+        <Space className="expense-filters">
+          <Input.Search defaultValue={keyword} placeholder="搜索单号或标题" allowClear onSearch={onSearch} />
+          <Select
+            allowClear
+            placeholder="状态"
+            value={status}
+            options={expenseStatusOptions}
+            onChange={(value) => onStatusChange(value)}
+            className="expense-status-filter"
+          />
+        </Space>
         <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={onCreate}>
           新建报销单
         </Button>
@@ -587,9 +687,10 @@ function ExpenseReportsView({
         rowKey="id"
         loading={loading}
         dataSource={data?.items ?? []}
-        columns={expenseColumns(canWrite, onEdit, onSubmit, onVoid)}
+        columns={expenseColumns(canWrite, canWithdraw, onEdit, onSubmit, onView, onWithdraw, onVoid)}
         scroll={{ x: 1180 }}
-        pagination={{ pageSize: 10, total: data?.total }}
+        pagination={{ current: page, pageSize, total: data?.total, showSizeChanger: true }}
+        onChange={(pagination) => onPageChange(pagination.current ?? 1, pagination.pageSize ?? pageSize)}
       />
     </>
   );
@@ -597,8 +698,11 @@ function ExpenseReportsView({
 
 function expenseColumns(
   canWrite: boolean,
+  canWithdraw: boolean,
   onEdit: (record: ExpenseReportRecord) => void,
   onSubmit: (record: ExpenseReportRecord) => void,
+  onView: (record: ExpenseReportRecord) => void,
+  onWithdraw: (record: ExpenseReportRecord) => void,
   onVoid: (record: ExpenseReportRecord) => void,
 ): ColumnsType<ExpenseReportRecord> {
   return [
@@ -634,15 +738,21 @@ function expenseColumns(
     },
     {
       title: '操作',
-      width: 220,
+      width: 360,
       fixed: 'right',
       render: (_: unknown, record) => (
         <Space>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => onView(record)}>
+            查看
+          </Button>
           <Button size="small" disabled={!canWrite || record.status !== 'DRAFT'} onClick={() => onEdit(record)}>
             编辑
           </Button>
           <Button size="small" icon={<SendOutlined />} disabled={!canWrite || record.status !== 'DRAFT'} onClick={() => onSubmit(record)}>
             提交
+          </Button>
+          <Button size="small" disabled={!canWithdraw || record.status !== 'SUBMITTED'} onClick={() => onWithdraw(record)}>
+            撤回
           </Button>
           <Button size="small" danger disabled={!canWrite || record.status !== 'DRAFT'} onClick={() => onVoid(record)}>
             作废
@@ -732,6 +842,84 @@ function ExpenseReportForm({ form, onFinish }: { form: FormInstance<ExpenseFormV
   );
 }
 
+function ExpenseReportDetail({ record }: { record: ExpenseReportRecord }) {
+  return (
+    <div className="expense-detail">
+      <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
+        <Descriptions.Item label="单号">{record.reportNo}</Descriptions.Item>
+        <Descriptions.Item label="标题">{record.title}</Descriptions.Item>
+        <Descriptions.Item label="状态">
+          <ExpenseStatusTag status={record.status} />
+        </Descriptions.Item>
+        <Descriptions.Item label="申请人">{record.applicant?.name ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="部门">{record.department?.name ?? record.departmentId ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="成本中心">{record.costCenter?.name ?? record.costCenterId ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="项目">{record.project?.name ?? record.projectId ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="币种">{record.currency}</Descriptions.Item>
+        <Descriptions.Item label="提交时间">{record.submittedAt ? dayjs(record.submittedAt).format('YYYY-MM-DD HH:mm') : '-'}</Descriptions.Item>
+        <Descriptions.Item label="费用金额">{formatMoney(record.amountCents)}</Descriptions.Item>
+        <Descriptions.Item label="税额">{formatMoney(record.taxAmountCents)}</Descriptions.Item>
+        <Descriptions.Item label="可抵扣税额">{formatMoney(record.deductibleTaxCents)}</Descriptions.Item>
+        <Descriptions.Item label="可报销金额">{formatMoney(record.reimbursableCents)}</Descriptions.Item>
+        <Descriptions.Item label="实付金额">{formatMoney(record.paidAmountCents)}</Descriptions.Item>
+      </Descriptions>
+
+      <Divider orientation="left">报销明细</Divider>
+      <Table
+        rowKey={(item) => item.id ?? `${item.occurredAt}-${item.description}`}
+        dataSource={record.items ?? []}
+        columns={expenseItemColumns()}
+        pagination={false}
+        scroll={{ x: 900 }}
+        size="small"
+      />
+
+      <Divider orientation="left">状态日志</Divider>
+      <Table
+        rowKey="id"
+        dataSource={record.logs ?? []}
+        columns={expenseLogColumns()}
+        pagination={false}
+        scroll={{ x: 760 }}
+        size="small"
+      />
+    </div>
+  );
+}
+
+function expenseItemColumns(): ColumnsType<ExpenseReportItemRecord> {
+  return [
+    { title: '发生日期', dataIndex: 'occurredAt', width: 120, render: (value: string) => dayjs(value).format('YYYY-MM-DD') },
+    { title: '费用类型', dataIndex: 'expenseTypeCode', width: 120, render: expenseTypeName },
+    { title: '会计科目', dataIndex: 'accountSubjectCode', width: 120, render: (value?: string | null) => value ?? '-' },
+    { title: '说明', dataIndex: 'description', width: 180 },
+    { title: '费用金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
+    { title: '税额', dataIndex: 'taxAmountCents', width: 110, align: 'right', render: formatMoney },
+    { title: '可抵扣税额', dataIndex: 'deductibleTaxCents', width: 130, align: 'right', render: formatMoney },
+    { title: '可报销金额', dataIndex: 'reimbursableCents', width: 130, align: 'right', render: formatMoney },
+  ];
+}
+
+function expenseLogColumns(): ColumnsType<ExpenseReportLogRecord> {
+  return [
+    { title: '时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    { title: '操作人', dataIndex: 'operator', width: 120, render: (operator: ExpenseReportLogRecord['operator']) => operator.name },
+    { title: '动作', dataIndex: 'action', width: 120, render: expenseActionName },
+    {
+      title: '状态变化',
+      width: 180,
+      render: (_: unknown, record) => (
+        <Space>
+          {record.fromStatus ? <ExpenseStatusTag status={record.fromStatus} /> : <Text type="secondary">初始</Text>}
+          <Text type="secondary">→</Text>
+          <ExpenseStatusTag status={record.toStatus} />
+        </Space>
+      ),
+    },
+    { title: '意见', dataIndex: 'comment', width: 220, render: (comment?: string | null) => comment ?? '-' },
+  ];
+}
+
 function MoneyField({ name, label }: { name: Array<string | number>; label: string }) {
   return (
     <Form.Item
@@ -754,6 +942,21 @@ function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
     VOIDED: { color: 'error', label: '已作废' },
   }[status];
   return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function expenseTypeName(code?: string) {
+  return expenseTypeOptions.find((option) => option.value === code)?.label ?? code ?? '-';
+}
+
+function expenseActionName(action: ExpenseReportLogRecord['action']) {
+  const names = {
+    CREATE: '创建草稿',
+    UPDATE: '更新草稿',
+    SUBMIT: '提交',
+    WITHDRAW: '撤回',
+    VOID: '作废',
+  };
+  return names[action];
 }
 
 function columns(

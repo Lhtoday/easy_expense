@@ -111,6 +111,18 @@ body {
   max-width: 420px;
 }
 
+.expense-filters {
+  flex: 1;
+}
+
+.expense-filters .ant-input-search {
+  width: min(420px, 100%);
+}
+
+.expense-status-filter {
+  width: 140px;
+}
+
 .permission-tags {
   display: flex;
   flex-wrap: wrap;
@@ -207,6 +219,11 @@ body {
   margin-top: 10px;
 }
 
+.expense-detail {
+  display: grid;
+  gap: 4px;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;
@@ -232,8 +249,23 @@ body {
     align-items: stretch;
   }
 
-  .table-toolbar .ant-input-search {
+  .table-toolbar .ant-input-search,
+  .expense-filters .ant-input-search,
+  .expense-status-filter {
     max-width: none;
+    width: 100%;
+  }
+
+  .expense-filters {
+    width: 100%;
+  }
+
+  .expense-filters.ant-space {
+    align-items: stretch;
+  }
+
+  .expense-filters .ant-space-item {
+    width: 100%;
   }
 
   .permission-check-list {

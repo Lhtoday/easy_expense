@@ -175,6 +175,31 @@ export class ExpenseReportsService {
     });
   }
 
+  async withdraw(user: AuthenticatedUser, id: string, comment?: string) {
+    this.ensurePermission(user, 'exp:report:withdraw');
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await this.ensureWithdrawable(tx, id, user);
+      return tx.expenseReport.update({
+        where: { id },
+        data: {
+          status: ExpenseReportStatus.DRAFT,
+          updatedById: user.id,
+          logs: {
+            create: {
+              operatorId: user.id,
+              action: ExpenseReportAction.WITHDRAW,
+              fromStatus: existing.status,
+              toStatus: ExpenseReportStatus.DRAFT,
+              comment: comment ?? '申请人撤回报销单',
+            },
+          },
+        },
+        select: this.detailSelect(),
+      });
+    });
+  }
+
   private ensurePermission(user: AuthenticatedUser, permission: string) {
     if (!user.permissions.includes(permission)) {
       throw new ForbiddenException('缺少报销单操作权限');
@@ -235,6 +260,25 @@ export class ExpenseReportsService {
     }
     if (report.status !== ExpenseReportStatus.DRAFT) {
       throw new BadRequestException('只有草稿状态的报销单可以编辑或提交');
+    }
+
+    return report;
+  }
+
+  private async ensureWithdrawable(tx: Prisma.TransactionClient, id: string, user: AuthenticatedUser) {
+    const report = await tx.expenseReport.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, applicantId: true },
+    });
+
+    if (!report) {
+      throw new NotFoundException('报销单不存在');
+    }
+    if (report.applicantId !== user.id) {
+      throw new ForbiddenException('只能撤回本人提交的报销单');
+    }
+    if (report.status !== ExpenseReportStatus.SUBMITTED) {
+      throw new BadRequestException('只有已提交且尚未进入审批处理的报销单可以撤回');
     }
 
     return report;

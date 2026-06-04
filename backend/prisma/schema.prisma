@@ -49,6 +49,7 @@ enum ExpenseReportAction {
   CREATE
   UPDATE
   SUBMIT
+  WITHDRAW
   VOID
 }
 

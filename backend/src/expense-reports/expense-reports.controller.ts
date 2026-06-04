@@ -33,6 +33,11 @@ export class ExpenseReportsController {
     return this.service.submit(request.user, id, dto.comment);
   }
 
+  @Post(':id/withdraw')
+  withdraw(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: SubmitExpenseReportDto) {
+    return this.service.withdraw(request.user, id, dto.comment);
+  }
+
   @Delete(':id')
   remove(@Req() request: RequestWithUser, @Param('id') id: string) {
     return this.service.void(request.user, id);

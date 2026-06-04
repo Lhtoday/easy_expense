@@ -12,7 +12,7 @@ const user: AuthenticatedUser = {
   departmentId: 'dept_1',
   costCenterId: 'cc_1',
   roles: [{ code: 'ADMIN', name: '系统管理员' }],
-  permissions: ['exp:report:read', 'exp:report:write'],
+  permissions: ['exp:report:read', 'exp:report:write', 'exp:report:withdraw'],
 };
 
 const draft = {
@@ -89,5 +89,53 @@ describe('ExpenseReportsService', () => {
     const service = new ExpenseReportsService(prisma as never);
 
     await expect(service.submit(user, 'report_1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('withdraws own submitted report back to draft with audit log', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.SUBMITTED,
+          applicantId: user.id,
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.DRAFT }),
+      },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(service.withdraw(user, 'report_1', '填错金额')).resolves.toEqual({ id: 'report_1', status: ExpenseReportStatus.DRAFT });
+    expect(tx.expenseReport.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ExpenseReportStatus.DRAFT,
+          logs: expect.objectContaining({
+            create: expect.objectContaining({
+              action: 'WITHDRAW',
+              fromStatus: ExpenseReportStatus.SUBMITTED,
+              toStatus: ExpenseReportStatus.DRAFT,
+              comment: '填错金额',
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('blocks withdrawing another applicant report', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.SUBMITTED,
+          applicantId: 'other_user',
+        }),
+      },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(service.withdraw(user, 'report_1')).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
