@@ -1,13 +1,24 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ExpenseReportAction, ExpenseReportStatus, Prisma } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ExpenseAttachmentCategory, ExpenseReportAction, ExpenseReportStatus, InvoiceDuplicateStatus, Prisma } from '@prisma/client';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
-import { ExpenseReportItemDto, ExpenseReportListQueryDto, SaveExpenseReportDto } from './expense-report.dto';
+import { MinioStorageService } from '../storage/minio-storage.service';
+import {
+  ExpenseReportItemDto,
+  ExpenseReportListQueryDto,
+  RegisterExpenseAttachmentDto,
+  RegisterExpenseInvoiceDto,
+  SaveExpenseReportDto,
+  UploadExpenseAttachmentDto,
+} from './expense-report.dto';
 
 @Injectable()
 export class ExpenseReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly storage?: MinioStorageService,
+  ) {}
 
   async list(user: AuthenticatedUser, query: ExpenseReportListQueryDto): Promise<PageResult<unknown>> {
     this.ensurePermission(user, 'exp:report:read');
@@ -200,6 +211,177 @@ export class ExpenseReportsService {
     });
   }
 
+  async registerAttachment(user: AuthenticatedUser, reportId: string, dto: RegisterExpenseAttachmentDto) {
+    this.ensurePermission(user, 'exp:attachment:write');
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.ensureEditable(tx, reportId);
+      return tx.expenseAttachment.create({
+        data: {
+          reportId,
+          fileName: dto.fileName,
+          mimeType: dto.mimeType,
+          sizeBytes: dto.sizeBytes,
+          storageBucket: dto.storageBucket,
+          storageKey: dto.storageKey,
+          category: dto.category ?? ExpenseAttachmentCategory.GENERAL,
+          uploadedById: user.id,
+        },
+        select: this.attachmentSelect(),
+      });
+    });
+  }
+
+  async uploadAttachment(
+    user: AuthenticatedUser,
+    reportId: string,
+    file: { originalname: string; mimetype: string; size: number; buffer?: Buffer },
+    dto: UploadExpenseAttachmentDto,
+  ) {
+    this.ensurePermission(user, 'exp:attachment:write');
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('附件文件不能为空');
+    }
+    const storage = this.storage;
+    const buffer = file.buffer;
+    if (!storage) {
+      throw new BadRequestException('文件存储服务未配置');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.ensureEditable(tx, reportId);
+      const stored = await this.runStorageOperation(() =>
+        storage.putExpenseAttachment(reportId, {
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          buffer,
+        }),
+      );
+      return tx.expenseAttachment.create({
+        data: {
+          reportId,
+          fileName: file.originalname,
+          mimeType: file.mimetype || 'application/octet-stream',
+          sizeBytes: file.size,
+          storageBucket: stored.storageBucket,
+          storageKey: stored.storageKey,
+          category: dto.category ?? ExpenseAttachmentCategory.GENERAL,
+          uploadedById: user.id,
+        },
+        select: this.attachmentSelect(),
+      });
+    });
+  }
+
+  async removeAttachment(user: AuthenticatedUser, reportId: string, attachmentId: string) {
+    this.ensurePermission(user, 'exp:attachment:write');
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.ensureEditable(tx, reportId);
+      const attachment = await tx.expenseAttachment.findFirst({ where: { id: attachmentId, reportId, deletedAt: null }, select: { id: true } });
+      if (!attachment) {
+        throw new NotFoundException('附件不存在');
+      }
+      return tx.expenseAttachment.update({
+        where: { id: attachmentId },
+        data: { deletedAt: new Date() },
+        select: this.attachmentSelect(),
+      });
+    });
+  }
+
+  async openAttachment(user: AuthenticatedUser, reportId: string, attachmentId: string) {
+    this.ensurePermission(user, 'exp:attachment:read');
+    if (!this.storage) {
+      throw new BadRequestException('文件存储服务未配置');
+    }
+
+    const attachment = await this.prisma.expenseAttachment.findFirst({
+      where: { id: attachmentId, reportId, deletedAt: null, report: { deletedAt: null } },
+      select: {
+        id: true,
+        fileName: true,
+        mimeType: true,
+        sizeBytes: true,
+        storageBucket: true,
+        storageKey: true,
+      },
+    });
+    if (!attachment) {
+      throw new NotFoundException('附件不存在');
+    }
+
+    const object = await this.runStorageOperation(() => this.storage!.getObject(attachment.storageBucket, attachment.storageKey));
+    return { attachment, stream: object.stream };
+  }
+
+  async registerInvoice(user: AuthenticatedUser, reportId: string, dto: RegisterExpenseInvoiceDto) {
+    this.ensurePermission(user, 'exp:invoice:write');
+    this.validateInvoice(dto);
+
+    return this.prisma.$transaction(async (tx) => {
+      const report = await this.ensureEditable(tx, reportId);
+      if (dto.itemId) {
+        const item = await tx.expenseReportItem.findFirst({ where: { id: dto.itemId, reportId }, select: { id: true } });
+        if (!item) {
+          throw new BadRequestException('发票关联的报销明细不存在');
+        }
+      }
+
+      const duplicate = await tx.expenseInvoice.findFirst({
+        where: {
+          deletedAt: null,
+          invoiceCode: dto.invoiceCode ?? null,
+          invoiceNo: dto.invoiceNo,
+          issuedAt: new Date(dto.issuedAt),
+          totalAmountCents: dto.totalAmountCents,
+          sellerName: dto.sellerName,
+        },
+        select: { id: true },
+      });
+
+      return tx.expenseInvoice.create({
+        data: {
+          reportId,
+          itemId: dto.itemId,
+          invoiceCode: dto.invoiceCode,
+          invoiceNo: dto.invoiceNo,
+          issuedAt: new Date(dto.issuedAt),
+          sellerName: dto.sellerName,
+          sellerTaxNo: dto.sellerTaxNo,
+          buyerName: dto.buyerName,
+          buyerTaxNo: dto.buyerTaxNo,
+          amountCents: dto.amountCents,
+          taxAmountCents: dto.taxAmountCents,
+          deductibleTaxCents: dto.deductibleTaxCents,
+          totalAmountCents: dto.totalAmountCents,
+          currency: dto.currency ?? report.currency,
+          duplicateStatus: duplicate ? InvoiceDuplicateStatus.DUPLICATE : InvoiceDuplicateStatus.UNIQUE,
+          duplicateOfId: duplicate?.id,
+          createdById: user.id,
+        },
+        select: this.invoiceSelect(),
+      });
+    });
+  }
+
+  async removeInvoice(user: AuthenticatedUser, reportId: string, invoiceId: string) {
+    this.ensurePermission(user, 'exp:invoice:write');
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.ensureEditable(tx, reportId);
+      const invoice = await tx.expenseInvoice.findFirst({ where: { id: invoiceId, reportId, deletedAt: null }, select: { id: true } });
+      if (!invoice) {
+        throw new NotFoundException('发票不存在');
+      }
+      return tx.expenseInvoice.update({
+        where: { id: invoiceId },
+        data: { deletedAt: new Date() },
+        select: this.invoiceSelect(),
+      });
+    });
+  }
+
   private ensurePermission(user: AuthenticatedUser, permission: string) {
     if (!user.permissions.includes(permission)) {
       throw new ForbiddenException('缺少报销单操作权限');
@@ -215,6 +397,23 @@ export class ExpenseReportsService {
         throw new BadRequestException(`第 ${index + 1} 行可报销金额不能大于费用金额`);
       }
     });
+  }
+
+  private validateInvoice(invoice: RegisterExpenseInvoiceDto) {
+    if (invoice.deductibleTaxCents > invoice.taxAmountCents) {
+      throw new BadRequestException('发票可抵扣税额不能大于税额');
+    }
+    if (invoice.amountCents + invoice.taxAmountCents !== invoice.totalAmountCents) {
+      throw new BadRequestException('发票价税合计必须等于金额加税额');
+    }
+  }
+
+  private async runStorageOperation<T>(operation: () => Promise<T>) {
+    try {
+      return await operation();
+    } catch {
+      throw new BadRequestException('文件存储服务不可用，请确认 MinIO 已启动');
+    }
   }
 
   private calculateTotals(items: ExpenseReportItemDto[]) {
@@ -350,6 +549,53 @@ export class ExpenseReportsService {
           operator: { select: { id: true, name: true } },
         },
       },
+      attachments: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: this.attachmentSelect(),
+      },
+      invoices: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: this.invoiceSelect(),
+      },
     } satisfies Prisma.ExpenseReportSelect;
+  }
+
+  private attachmentSelect() {
+    return {
+      id: true,
+      fileName: true,
+      mimeType: true,
+      sizeBytes: true,
+      storageBucket: true,
+      storageKey: true,
+      category: true,
+      createdAt: true,
+      uploadedBy: { select: { id: true, name: true } },
+    } satisfies Prisma.ExpenseAttachmentSelect;
+  }
+
+  private invoiceSelect() {
+    return {
+      id: true,
+      itemId: true,
+      invoiceCode: true,
+      invoiceNo: true,
+      issuedAt: true,
+      sellerName: true,
+      sellerTaxNo: true,
+      buyerName: true,
+      buyerTaxNo: true,
+      amountCents: true,
+      taxAmountCents: true,
+      deductibleTaxCents: true,
+      totalAmountCents: true,
+      currency: true,
+      duplicateStatus: true,
+      duplicateOfId: true,
+      createdAt: true,
+      createdBy: { select: { id: true, name: true } },
+    } satisfies Prisma.ExpenseInvoiceSelect;
   }
 }

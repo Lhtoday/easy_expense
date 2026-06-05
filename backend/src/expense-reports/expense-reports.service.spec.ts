@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { ExpenseReportStatus } from '@prisma/client';
+import { ExpenseAttachmentCategory, ExpenseReportStatus } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { ExpenseReportsService } from './expense-reports.service';
@@ -12,7 +12,7 @@ const user: AuthenticatedUser = {
   departmentId: 'dept_1',
   costCenterId: 'cc_1',
   roles: [{ code: 'ADMIN', name: '系统管理员' }],
-  permissions: ['exp:report:read', 'exp:report:write', 'exp:report:withdraw'],
+  permissions: ['exp:report:read', 'exp:report:write', 'exp:report:withdraw', 'exp:attachment:read', 'exp:attachment:write', 'exp:invoice:write'],
 };
 
 const draft = {
@@ -137,5 +137,119 @@ describe('ExpenseReportsService', () => {
     const service = new ExpenseReportsService(prisma as never);
 
     await expect(service.withdraw(user, 'report_1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('uploads an attachment to storage before writing metadata', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.DRAFT,
+          currency: 'CNY',
+          departmentId: null,
+          costCenterId: null,
+          reimbursableCents: 12050,
+        }),
+      },
+      expenseAttachment: {
+        create: vi.fn().mockResolvedValue({ id: 'att_1', fileName: 'invoice.pdf' }),
+      },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const storage = {
+      putExpenseAttachment: vi.fn().mockResolvedValue({ storageBucket: 'expenseflow-files', storageKey: 'expense-reports/report_1/invoice.pdf' }),
+    };
+    const service = new ExpenseReportsService(prisma as never, storage as never);
+
+    await expect(
+      service.uploadAttachment(
+        user,
+        'report_1',
+        {
+          originalname: 'invoice.pdf',
+          mimetype: 'application/pdf',
+          size: 5,
+          buffer: Buffer.from('hello'),
+        },
+        { category: ExpenseAttachmentCategory.INVOICE_IMAGE },
+      ),
+    ).resolves.toEqual({ id: 'att_1', fileName: 'invoice.pdf' });
+    expect(storage.putExpenseAttachment).toHaveBeenCalledWith(
+      'report_1',
+      expect.objectContaining({ originalname: 'invoice.pdf', mimetype: 'application/pdf', buffer: Buffer.from('hello') }),
+    );
+    expect(tx.expenseAttachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          storageBucket: 'expenseflow-files',
+          storageKey: 'expense-reports/report_1/invoice.pdf',
+          category: 'INVOICE_IMAGE',
+          uploadedById: user.id,
+        }),
+      }),
+    );
+  });
+
+  it('blocks opening attachments without attachment read permission', async () => {
+    const service = new ExpenseReportsService({} as never, {} as never);
+    await expect(service.openAttachment({ ...user, permissions: ['exp:report:read'] }, 'report_1', 'att_1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('marks invoice metadata as duplicate when key fields already exist', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.DRAFT,
+          currency: 'CNY',
+          departmentId: null,
+          costCenterId: null,
+          reimbursableCents: 12050,
+        }),
+      },
+      expenseInvoice: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'invoice_0' }),
+        create: vi.fn().mockResolvedValue({ id: 'invoice_1', duplicateStatus: 'DUPLICATE', duplicateOfId: 'invoice_0' }),
+      },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(
+      service.registerInvoice(user, 'report_1', {
+        invoiceCode: '044001900111',
+        invoiceNo: '12345678',
+        issuedAt: '2026-06-04',
+        sellerName: '测试供应商',
+        amountCents: 10000,
+        taxAmountCents: 600,
+        deductibleTaxCents: 600,
+        totalAmountCents: 10600,
+      }),
+    ).resolves.toEqual({ id: 'invoice_1', duplicateStatus: 'DUPLICATE', duplicateOfId: 'invoice_0' });
+    expect(tx.expenseInvoice.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          duplicateStatus: 'DUPLICATE',
+          duplicateOfId: 'invoice_0',
+        }),
+      }),
+    );
+  });
+
+  it('rejects invoice totals that do not equal amount plus tax', async () => {
+    const service = new ExpenseReportsService({} as never);
+
+    await expect(
+      service.registerInvoice(user, 'report_1', {
+        invoiceNo: '12345678',
+        issuedAt: '2026-06-04',
+        sellerName: '测试供应商',
+        amountCents: 10000,
+        taxAmountCents: 600,
+        deductibleTaxCents: 600,
+        totalAmountCents: 10000,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

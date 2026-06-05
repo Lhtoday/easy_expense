@@ -2,6 +2,7 @@ import {
   ApartmentOutlined,
   BankOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EyeOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
@@ -12,9 +13,11 @@ import {
   SaveOutlined,
   SendOutlined,
   TeamOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Alert,
   Button,
   DatePicker,
   Descriptions,
@@ -29,10 +32,12 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { FormInstance } from 'antd';
+import type { UploadFile } from 'antd/es/upload/interface';
 import axios from 'axios';
 import dayjs, { Dayjs } from 'dayjs';
 import type { ReactNode } from 'react';
@@ -42,6 +47,7 @@ const { Content, Header, Sider } = Layout;
 const { Text } = Typography;
 
 type ApiResponse<T> = { success: boolean; data: T };
+type ApiErrorResponse = { success: false; error: { message: string } };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 type Status = 'ACTIVE' | 'DISABLED';
 type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'VOIDED';
@@ -97,6 +103,8 @@ interface ExpenseReportRecord {
   submittedAt?: string | null;
   items?: ExpenseReportItemRecord[];
   logs?: ExpenseReportLogRecord[];
+  attachments?: ExpenseAttachmentRecord[];
+  invoices?: ExpenseInvoiceRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -124,6 +132,39 @@ interface ExpenseReportLogRecord {
   operator: { id: string; name: string };
 }
 
+interface ExpenseAttachmentRecord {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageBucket: string;
+  storageKey: string;
+  category: 'GENERAL' | 'INVOICE_IMAGE' | 'PAYMENT_PROOF' | 'OTHER';
+  createdAt: string;
+  uploadedBy: { id: string; name: string };
+}
+
+interface ExpenseInvoiceRecord {
+  id: string;
+  itemId?: string | null;
+  invoiceCode?: string | null;
+  invoiceNo: string;
+  issuedAt: string;
+  sellerName: string;
+  sellerTaxNo?: string | null;
+  buyerName?: string | null;
+  buyerTaxNo?: string | null;
+  amountCents: number;
+  taxAmountCents: number;
+  deductibleTaxCents: number;
+  totalAmountCents: number;
+  currency: string;
+  duplicateStatus: 'UNIQUE' | 'DUPLICATE';
+  duplicateOfId?: string | null;
+  createdAt: string;
+  createdBy: { id: string; name: string };
+}
+
 interface ExpenseFormValues {
   title: string;
   departmentId?: string;
@@ -143,6 +184,26 @@ interface ExpenseFormValues {
     deductibleTaxYuan?: string;
     reimbursableYuan?: string;
   }>;
+}
+
+interface AttachmentFormValues {
+  category?: ExpenseAttachmentRecord['category'];
+}
+
+interface InvoiceFormValues {
+  itemId?: string;
+  invoiceCode?: string;
+  invoiceNo: string;
+  issuedAt?: Dayjs;
+  sellerName: string;
+  sellerTaxNo?: string;
+  buyerName?: string;
+  buyerTaxNo?: string;
+  amountYuan: string;
+  taxAmountYuan: string;
+  deductibleTaxYuan: string;
+  totalAmountYuan: string;
+  currency?: string;
 }
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api' });
@@ -202,6 +263,13 @@ function setToken(token: string | null) {
 
 function authHeaders() {
   return { Authorization: `Bearer ${getToken()}` };
+}
+
+function apiErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError<ApiErrorResponse>(error)) {
+    return error.response?.data?.error?.message ?? fallback;
+  }
+  return fallback;
 }
 
 export function App() {
@@ -427,6 +495,12 @@ export function App() {
     setExpenseDetailOpen(true);
   }
 
+  async function refreshExpenseDetail(reportId: string) {
+    const response = await api.get<ApiResponse<ExpenseReportRecord>>(`/expense-reports/${reportId}`, { headers: authHeaders() });
+    setExpenseViewing(response.data.data);
+    await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+  }
+
   if (sessionToken && loadingMe) {
     return (
       <Layout className="login-shell">
@@ -472,7 +546,7 @@ export function App() {
           <div className="brand-mark">EF</div>
           <div>
             <Text className="brand-title">ExpenseFlow</Text>
-            <Text className="brand-subtitle">Phase 2</Text>
+            <Text className="brand-subtitle">Phase 3</Text>
           </div>
         </div>
         <Menu
@@ -580,8 +654,10 @@ export function App() {
       >
         <ExpenseReportForm form={expenseForm} onFinish={(values) => saveExpenseMutation.mutate(values)} />
       </Modal>
-      <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1080}>
-        {expenseViewing ? <ExpenseReportDetail record={expenseViewing} /> : null}
+      <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
+        {expenseViewing ? (
+          <ExpenseReportDetail canWrite={canWrite} record={expenseViewing} onChanged={() => refreshExpenseDetail(expenseViewing.id)} />
+        ) : null}
       </Modal>
     </Layout>
   );
@@ -842,7 +918,106 @@ function ExpenseReportForm({ form, onFinish }: { form: FormInstance<ExpenseFormV
   );
 }
 
-function ExpenseReportDetail({ record }: { record: ExpenseReportRecord }) {
+function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolean; record: ExpenseReportRecord; onChanged: () => Promise<void> }) {
+  const [attachmentForm] = Form.useForm<AttachmentFormValues>();
+  const [invoiceForm] = Form.useForm<InvoiceFormValues>();
+  const [attachmentFiles, setAttachmentFiles] = useState<UploadFile[]>([]);
+
+  const uploadAttachmentMutation = useMutation({
+    mutationFn: async (values: AttachmentFormValues) => {
+      const file = attachmentFiles[0]?.originFileObj;
+      if (!file) {
+        throw new Error('missing file');
+      }
+      const payload = new FormData();
+      payload.append('file', file);
+      if (values.category) {
+        payload.append('category', values.category);
+      }
+      return api.post(`/expense-reports/${record.id}/attachments/upload`, payload, { headers: authHeaders() });
+    },
+    onSuccess: async () => {
+      attachmentForm.resetFields();
+      setAttachmentFiles([]);
+      await onChanged();
+      message.success('附件已上传');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '附件上传失败，请检查权限、单据状态或文件大小')),
+  });
+
+  const removeAttachmentMutation = useMutation({
+    mutationFn: async (attachmentId: string) =>
+      api.delete(`/expense-reports/${record.id}/attachments/${attachmentId}`, { headers: authHeaders() }),
+    onSuccess: async () => {
+      await onChanged();
+      message.success('附件已删除');
+    },
+    onError: () => message.error('附件删除失败'),
+  });
+
+  const registerInvoiceMutation = useMutation({
+    mutationFn: async (values: InvoiceFormValues) =>
+      api.post(
+        `/expense-reports/${record.id}/invoices`,
+        {
+          itemId: values.itemId,
+          invoiceCode: values.invoiceCode,
+          invoiceNo: values.invoiceNo,
+          issuedAt: values.issuedAt?.format('YYYY-MM-DD'),
+          sellerName: values.sellerName,
+          sellerTaxNo: values.sellerTaxNo,
+          buyerName: values.buyerName,
+          buyerTaxNo: values.buyerTaxNo,
+          amountCents: yuanToCents(values.amountYuan),
+          taxAmountCents: yuanToCents(values.taxAmountYuan),
+          deductibleTaxCents: yuanToCents(values.deductibleTaxYuan),
+          totalAmountCents: yuanToCents(values.totalAmountYuan),
+          currency: values.currency ?? record.currency,
+        },
+        { headers: authHeaders() },
+      ),
+    onSuccess: async () => {
+      invoiceForm.resetFields();
+      await onChanged();
+      message.success('发票已登记');
+    },
+    onError: () => message.error('发票登记失败，请检查金额、重复信息或单据状态'),
+  });
+
+  const removeInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: string) => api.delete(`/expense-reports/${record.id}/invoices/${invoiceId}`, { headers: authHeaders() }),
+    onSuccess: async () => {
+      await onChanged();
+      message.success('发票已删除');
+    },
+    onError: () => message.error('发票删除失败'),
+  });
+
+  const editable = canWrite && record.status === 'DRAFT';
+  const invoiceSummary = buildInvoiceSummary(record.items ?? [], record.invoices ?? []);
+  const invoiceItemOptions = (record.items ?? []).map((item, index) => {
+    const summary = invoiceSummary.byItemId.get(item.id ?? '');
+    const status = summary?.count ? `${summary.count} 张票据 / ${formatMoney(summary.totalAmountCents)}` : '未关联发票';
+    return { label: `${index + 1}. ${item.description} · ${formatMoney(item.reimbursableCents)} · ${status}`, value: item.id };
+  });
+
+  async function openAttachmentFile(attachment: ExpenseAttachmentRecord, mode: 'download' | 'preview') {
+    const response = await api.get<Blob>(`/expense-reports/${record.id}/attachments/${attachment.id}/${mode}`, {
+      headers: authHeaders(),
+      responseType: 'blob',
+    });
+    const url = URL.createObjectURL(response.data);
+    if (mode === 'preview') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = attachment.fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="expense-detail">
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
@@ -864,13 +1039,124 @@ function ExpenseReportDetail({ record }: { record: ExpenseReportRecord }) {
         <Descriptions.Item label="实付金额">{formatMoney(record.paidAmountCents)}</Descriptions.Item>
       </Descriptions>
 
+      <InvoiceCheckPanel summary={invoiceSummary} />
+
       <Divider orientation="left">报销明细</Divider>
       <Table
         rowKey={(item) => item.id ?? `${item.occurredAt}-${item.description}`}
         dataSource={record.items ?? []}
-        columns={expenseItemColumns()}
+        columns={expenseItemColumns(invoiceSummary)}
+        pagination={false}
+        scroll={{ x: 1080 }}
+        size="small"
+      />
+
+      <Divider orientation="left">附件</Divider>
+      {editable ? (
+        <Form
+          form={attachmentForm}
+          className="expense-sub-form"
+          layout="vertical"
+          onFinish={(values) => uploadAttachmentMutation.mutate(values)}
+          initialValues={{ category: 'GENERAL' }}
+        >
+          <Form.Item label="文件" required>
+            <Upload
+              beforeUpload={() => false}
+              fileList={attachmentFiles}
+              maxCount={1}
+              onChange={({ fileList }) => setAttachmentFiles(fileList)}
+            >
+              <Button icon={<UploadOutlined />}>选择文件</Button>
+            </Upload>
+          </Form.Item>
+          <Form.Item name="category" label="类型">
+            <Select
+              options={[
+                { label: '普通附件', value: 'GENERAL' },
+                { label: '发票影像', value: 'INVOICE_IMAGE' },
+                { label: '付款凭证', value: 'PAYMENT_PROOF' },
+                { label: '其他', value: 'OTHER' },
+              ]}
+            />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" disabled={!attachmentFiles.length} loading={uploadAttachmentMutation.isPending}>
+            上传附件
+          </Button>
+        </Form>
+      ) : null}
+      <Table
+        rowKey="id"
+        dataSource={record.attachments ?? []}
+        columns={expenseAttachmentColumns(
+          editable,
+          (attachment) => void openAttachmentFile(attachment, 'preview'),
+          (attachment) => void openAttachmentFile(attachment, 'download'),
+          (id) => removeAttachmentMutation.mutate(id),
+        )}
         pagination={false}
         scroll={{ x: 900 }}
+        size="small"
+      />
+
+      <Divider orientation="left">发票</Divider>
+      {editable ? (
+        <Form
+          form={invoiceForm}
+          className="expense-sub-form invoice-sub-form"
+          layout="vertical"
+          onFinish={(values) => registerInvoiceMutation.mutate(values)}
+          initialValues={{ currency: record.currency, taxAmountYuan: '0.00', deductibleTaxYuan: '0.00' }}
+        >
+          <Form.Item name="itemId" label="关联明细">
+            <Select
+              allowClear
+              options={invoiceItemOptions}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Form.Item name="invoiceCode" label="发票代码">
+            <Input />
+          </Form.Item>
+          <Form.Item name="invoiceNo" label="发票号码" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="issuedAt" label="开票日期" rules={[{ required: true }]}>
+            <DatePicker className="full-width-control" />
+          </Form.Item>
+          <Form.Item name="sellerName" label="销方名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="sellerTaxNo" label="销方税号">
+            <Input />
+          </Form.Item>
+          <Form.Item name="amountYuan" label="金额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+            <Input suffix="元" inputMode="decimal" />
+          </Form.Item>
+          <Form.Item name="taxAmountYuan" label="税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+            <Input suffix="元" inputMode="decimal" />
+          </Form.Item>
+          <Form.Item name="deductibleTaxYuan" label="可抵扣税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+            <Input suffix="元" inputMode="decimal" />
+          </Form.Item>
+          <Form.Item name="totalAmountYuan" label="价税合计" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+            <Input suffix="元" inputMode="decimal" />
+          </Form.Item>
+          <Form.Item name="currency" label="币种">
+            <Input />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={registerInvoiceMutation.isPending}>
+            登记发票
+          </Button>
+        </Form>
+      ) : null}
+      <Table
+        rowKey="id"
+        dataSource={record.invoices ?? []}
+        columns={expenseInvoiceColumns(record.items ?? [], editable, invoiceSummary, (id) => removeInvoiceMutation.mutate(id))}
+        pagination={false}
+        scroll={{ x: 1180 }}
         size="small"
       />
 
@@ -887,7 +1173,50 @@ function ExpenseReportDetail({ record }: { record: ExpenseReportRecord }) {
   );
 }
 
-function expenseItemColumns(): ColumnsType<ExpenseReportItemRecord> {
+interface InvoiceItemSummary {
+  count: number;
+  duplicateCount: number;
+  totalAmountCents: number;
+}
+
+interface InvoiceSummary {
+  byItemId: Map<string, InvoiceItemSummary>;
+  duplicateInvoices: ExpenseInvoiceRecord[];
+  unlinkedInvoices: ExpenseInvoiceRecord[];
+  uncoveredItems: ExpenseReportItemRecord[];
+}
+
+function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
+  const issues = [
+    summary.uncoveredItems.length ? `${summary.uncoveredItems.length} 条明细未关联发票` : '',
+    summary.duplicateInvoices.length ? `${summary.duplicateInvoices.length} 张发票重复` : '',
+    summary.unlinkedInvoices.length ? `${summary.unlinkedInvoices.length} 张发票未关联明细` : '',
+  ].filter(Boolean);
+
+  if (!issues.length) {
+    return <Alert className="invoice-check-panel" type="success" showIcon message="发票检查通过" description="所有报销明细均已关联发票，且当前没有重复发票。" />;
+  }
+
+  return (
+    <Alert
+      className="invoice-check-panel"
+      type="warning"
+      showIcon
+      message="发票检查待处理"
+      description={
+        <Space wrap>
+          {issues.map((issue) => (
+            <Tag color="warning" key={issue}>
+              {issue}
+            </Tag>
+          ))}
+        </Space>
+      }
+    />
+  );
+}
+
+function expenseItemColumns(summary: InvoiceSummary): ColumnsType<ExpenseReportItemRecord> {
   return [
     { title: '发生日期', dataIndex: 'occurredAt', width: 120, render: (value: string) => dayjs(value).format('YYYY-MM-DD') },
     { title: '费用类型', dataIndex: 'expenseTypeCode', width: 120, render: expenseTypeName },
@@ -897,6 +1226,96 @@ function expenseItemColumns(): ColumnsType<ExpenseReportItemRecord> {
     { title: '税额', dataIndex: 'taxAmountCents', width: 110, align: 'right', render: formatMoney },
     { title: '可抵扣税额', dataIndex: 'deductibleTaxCents', width: 130, align: 'right', render: formatMoney },
     { title: '可报销金额', dataIndex: 'reimbursableCents', width: 130, align: 'right', render: formatMoney },
+    {
+      title: '发票状态',
+      width: 180,
+      render: (_: unknown, item) => {
+        const itemSummary = summary.byItemId.get(item.id ?? '');
+        if (!itemSummary?.count) {
+          return <Tag color="warning">未关联</Tag>;
+        }
+        return (
+          <Space wrap size={4}>
+            <Tag color="green">{itemSummary.count} 张</Tag>
+            <Text>{formatMoney(itemSummary.totalAmountCents)}</Text>
+            {itemSummary.duplicateCount ? <Tag color="error">重复 {itemSummary.duplicateCount}</Tag> : null}
+          </Space>
+        );
+      },
+    },
+  ];
+}
+
+function expenseAttachmentColumns(
+  editable: boolean,
+  onPreview: (record: ExpenseAttachmentRecord) => void,
+  onDownload: (record: ExpenseAttachmentRecord) => void,
+  onRemove: (id: string) => void,
+): ColumnsType<ExpenseAttachmentRecord> {
+  return [
+    { title: '文件名', dataIndex: 'fileName', width: 220 },
+    { title: '类型', dataIndex: 'category', width: 120, render: attachmentCategoryName },
+    { title: 'MIME', dataIndex: 'mimeType', width: 160 },
+    { title: '大小', dataIndex: 'sizeBytes', width: 120, align: 'right', render: formatBytes },
+    { title: '存储位置', width: 260, render: (_: unknown, record) => `${record.storageBucket}/${record.storageKey}` },
+    { title: '上传人', dataIndex: 'uploadedBy', width: 120, render: (user: ExpenseAttachmentRecord['uploadedBy']) => user.name },
+    { title: '登记时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    {
+      title: '操作',
+      width: 150,
+      render: (_: unknown, record) => (
+        <Space>
+          <Button icon={<EyeOutlined />} size="small" onClick={() => onPreview(record)} />
+          <Button icon={<DownloadOutlined />} size="small" onClick={() => onDownload(record)} />
+          <Button danger disabled={!editable} icon={<DeleteOutlined />} size="small" onClick={() => onRemove(record.id)} />
+        </Space>
+      ),
+    },
+  ];
+}
+
+function expenseInvoiceColumns(
+  items: ExpenseReportItemRecord[],
+  editable: boolean,
+  summary: InvoiceSummary,
+  onRemove: (id: string) => void,
+): ColumnsType<ExpenseInvoiceRecord> {
+  return [
+    { title: '发票号码', dataIndex: 'invoiceNo', width: 160 },
+    { title: '发票代码', dataIndex: 'invoiceCode', width: 130, render: (value?: string | null) => value ?? '-' },
+    { title: '开票日期', dataIndex: 'issuedAt', width: 120, render: (value: string) => dayjs(value).format('YYYY-MM-DD') },
+    { title: '销方', dataIndex: 'sellerName', width: 180 },
+    {
+      title: '关联明细',
+      dataIndex: 'itemId',
+      width: 220,
+      render: (itemId?: string | null) => {
+        const item = items.find((item) => item.id === itemId);
+        return item ? item.description : <Tag color="warning">未关联明细</Tag>;
+      },
+    },
+    { title: '金额', dataIndex: 'amountCents', width: 110, align: 'right', render: formatMoney },
+    { title: '税额', dataIndex: 'taxAmountCents', width: 110, align: 'right', render: formatMoney },
+    { title: '价税合计', dataIndex: 'totalAmountCents', width: 120, align: 'right', render: formatMoney },
+    {
+      title: '重复校验',
+      dataIndex: 'duplicateStatus',
+      width: 120,
+      render: (status: ExpenseInvoiceRecord['duplicateStatus'], invoice) =>
+        status === 'DUPLICATE' ? (
+          <Tag color="error">重复{invoice.duplicateOfId ? ` · ${invoice.duplicateOfId.slice(0, 6)}` : ''}</Tag>
+        ) : (
+          <Tag color={summary.unlinkedInvoices.some((item) => item.id === invoice.id) ? 'warning' : 'green'}>未重复</Tag>
+        ),
+    },
+    { title: '登记人', dataIndex: 'createdBy', width: 120, render: (user: ExpenseInvoiceRecord['createdBy']) => user.name },
+    {
+      title: '操作',
+      width: 90,
+      render: (_: unknown, record) => (
+        <Button danger disabled={!editable} icon={<DeleteOutlined />} size="small" onClick={() => onRemove(record.id)} />
+      ),
+    },
   ];
 }
 
@@ -948,6 +1367,16 @@ function expenseTypeName(code?: string) {
   return expenseTypeOptions.find((option) => option.value === code)?.label ?? code ?? '-';
 }
 
+function attachmentCategoryName(category: ExpenseAttachmentRecord['category']) {
+  const names = {
+    GENERAL: '普通附件',
+    INVOICE_IMAGE: '发票影像',
+    PAYMENT_PROOF: '付款凭证',
+    OTHER: '其他',
+  };
+  return names[category];
+}
+
 function expenseActionName(action: ExpenseReportLogRecord['action']) {
   const names = {
     CREATE: '创建草稿',
@@ -957,6 +1386,39 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     VOID: '作废',
   };
   return names[action];
+}
+
+function buildInvoiceSummary(items: ExpenseReportItemRecord[], invoices: ExpenseInvoiceRecord[]): InvoiceSummary {
+  const byItemId = new Map<string, InvoiceItemSummary>();
+  invoices.forEach((invoice) => {
+    if (!invoice.itemId) {
+      return;
+    }
+    const current = byItemId.get(invoice.itemId) ?? { count: 0, duplicateCount: 0, totalAmountCents: 0 };
+    current.count += 1;
+    current.totalAmountCents += invoice.totalAmountCents;
+    if (invoice.duplicateStatus === 'DUPLICATE') {
+      current.duplicateCount += 1;
+    }
+    byItemId.set(invoice.itemId, current);
+  });
+
+  return {
+    byItemId,
+    duplicateInvoices: invoices.filter((invoice) => invoice.duplicateStatus === 'DUPLICATE'),
+    unlinkedInvoices: invoices.filter((invoice) => !invoice.itemId),
+    uncoveredItems: items.filter((item) => !byItemId.has(item.id ?? '')),
+  };
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function columns(

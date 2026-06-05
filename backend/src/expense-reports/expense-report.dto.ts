@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
-import { ExpenseReportStatus } from '@prisma/client';
+import { ExpenseAttachmentCategory, ExpenseReportStatus } from '@prisma/client';
 
 export class ExpenseReportItemDto {
   @IsDateString()
@@ -106,4 +106,83 @@ export class SubmitExpenseReportBodyDto extends SubmitExpenseReportDto {
   @ValidateNested({ each: true })
   @Type(() => ExpenseReportItemDto)
   items?: ExpenseReportItemDto[];
+}
+
+export class RegisterExpenseAttachmentDto {
+  @IsString()
+  fileName!: string;
+
+  @IsString()
+  mimeType!: string;
+
+  @IsInt()
+  @Min(1)
+  sizeBytes!: number;
+
+  @IsString()
+  storageBucket!: string;
+
+  @IsString()
+  storageKey!: string;
+
+  @IsOptional()
+  @IsEnum(ExpenseAttachmentCategory)
+  category?: ExpenseAttachmentCategory;
+}
+
+export class UploadExpenseAttachmentDto {
+  @IsOptional()
+  @IsEnum(ExpenseAttachmentCategory)
+  category?: ExpenseAttachmentCategory;
+}
+
+export class RegisterExpenseInvoiceDto {
+  @IsOptional()
+  @IsString()
+  itemId?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceCode?: string;
+
+  @IsString()
+  invoiceNo!: string;
+
+  @IsDateString()
+  issuedAt!: string;
+
+  @IsString()
+  sellerName!: string;
+
+  @IsOptional()
+  @IsString()
+  sellerTaxNo?: string;
+
+  @IsOptional()
+  @IsString()
+  buyerName?: string;
+
+  @IsOptional()
+  @IsString()
+  buyerTaxNo?: string;
+
+  @IsInt()
+  @Min(0)
+  amountCents!: number;
+
+  @IsInt()
+  @Min(0)
+  taxAmountCents!: number;
+
+  @IsInt()
+  @Min(0)
+  deductibleTaxCents!: number;
+
+  @IsInt()
+  @Min(1)
+  totalAmountCents!: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }

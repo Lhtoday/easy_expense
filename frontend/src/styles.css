@@ -224,6 +224,34 @@ body {
   gap: 4px;
 }
 
+.invoice-check-panel {
+  margin-top: 12px;
+}
+
+.expense-sub-form {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.invoice-sub-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.expense-sub-form .ant-btn {
+  align-self: center;
+  width: 100%;
+}
+
+.full-width-control {
+  width: 100%;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;
@@ -273,7 +301,9 @@ body {
   }
 
   .expense-form-grid,
-  .expense-line-grid {
+  .expense-line-grid,
+  .expense-sub-form,
+  .invoice-sub-form {
     grid-template-columns: 1fr;
   }
 }

@@ -53,6 +53,18 @@ enum ExpenseReportAction {
   VOID
 }
 
+enum ExpenseAttachmentCategory {
+  GENERAL
+  INVOICE_IMAGE
+  PAYMENT_PROOF
+  OTHER
+}
+
+enum InvoiceDuplicateStatus {
+  UNIQUE
+  DUPLICATE
+}
+
 model User {
   id             String             @id @default(cuid())
   employeeNo     String             @unique @map("employee_no")
@@ -71,6 +83,8 @@ model User {
   createdReports ExpenseReport[]    @relation("ExpenseReportApplicant")
   updatedReports ExpenseReport[]    @relation("ExpenseReportUpdater")
   reportLogs     ExpenseReportLog[]
+  uploadedAttachments ExpenseAttachment[] @relation("ExpenseAttachmentUploader")
+  invoiceCreatedBy ExpenseInvoice[]       @relation("ExpenseInvoiceCreator")
 
   @@map("iam_users")
 }
@@ -233,6 +247,8 @@ model ExpenseReport {
   project               Project?              @relation(fields: [projectId], references: [id])
   items                 ExpenseReportItem[]
   logs                  ExpenseReportLog[]
+  attachments           ExpenseAttachment[]
+  invoices              ExpenseInvoice[]
 
   @@index([applicantId, status])
   @@index([departmentId])
@@ -261,9 +277,65 @@ model ExpenseReportItem {
   department            Department?   @relation(fields: [departmentId], references: [id])
   costCenter            CostCenter?   @relation(fields: [costCenterId], references: [id])
   project               Project?      @relation(fields: [projectId], references: [id])
+  invoices              ExpenseInvoice[]
 
   @@index([reportId])
   @@map("exp_report_items")
+}
+
+model ExpenseAttachment {
+  id              String                    @id @default(cuid())
+  reportId        String                    @map("report_id")
+  fileName        String                    @map("file_name")
+  mimeType        String                    @map("mime_type")
+  sizeBytes       Int                       @map("size_bytes")
+  storageBucket   String                    @map("storage_bucket")
+  storageKey      String                    @map("storage_key")
+  category        ExpenseAttachmentCategory @default(GENERAL)
+  uploadedById    String                    @map("uploaded_by")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  deletedAt       DateTime?                 @map("deleted_at")
+  report          ExpenseReport             @relation(fields: [reportId], references: [id])
+  uploadedBy      User                      @relation("ExpenseAttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([reportId])
+  @@index([uploadedById])
+  @@map("exp_attachments")
+}
+
+model ExpenseInvoice {
+  id                    String                 @id @default(cuid())
+  reportId              String                 @map("report_id")
+  itemId                String?                @map("item_id")
+  invoiceCode           String?                @map("invoice_code")
+  invoiceNo             String                 @map("invoice_no")
+  issuedAt              DateTime               @map("issued_at")
+  sellerName            String                 @map("seller_name")
+  sellerTaxNo           String?                @map("seller_tax_no")
+  buyerName             String?                @map("buyer_name")
+  buyerTaxNo            String?                @map("buyer_tax_no")
+  amountCents           Int                    @map("amount_cents")
+  taxAmountCents        Int                    @default(0) @map("tax_amount_cents")
+  deductibleTaxCents    Int                    @default(0) @map("deductible_tax_cents")
+  totalAmountCents      Int                    @map("total_amount_cents")
+  currency              String                 @default("CNY")
+  duplicateStatus       InvoiceDuplicateStatus @default(UNIQUE) @map("duplicate_status")
+  duplicateOfId         String?                @map("duplicate_of_id")
+  createdById           String                 @map("created_by")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  deletedAt             DateTime?              @map("deleted_at")
+  report                ExpenseReport          @relation(fields: [reportId], references: [id])
+  item                  ExpenseReportItem?     @relation(fields: [itemId], references: [id])
+  duplicateOf           ExpenseInvoice?        @relation("InvoiceDuplicate", fields: [duplicateOfId], references: [id])
+  duplicates            ExpenseInvoice[]       @relation("InvoiceDuplicate")
+  createdBy             User                   @relation("ExpenseInvoiceCreator", fields: [createdById], references: [id])
+
+  @@index([reportId])
+  @@index([itemId])
+  @@index([createdById])
+  @@index([invoiceCode, invoiceNo, issuedAt, totalAmountCents, sellerName])
+  @@map("exp_invoices")
 }
 
 model ExpenseReportLog {
