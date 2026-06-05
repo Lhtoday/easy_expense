@@ -4,9 +4,9 @@
 
 ## Current Phase
 
-- Phase: Phase 3 - Attachments And Invoice Metadata
+- Phase: Phase 4 - Lightweight Approval Workflow
 - Status: Done
-- Started At: 2026-06-04
+- Started At: 2026-06-05
 - Completed At: 2026-06-05
 
 ## Phase 0 Completion Checklist
@@ -69,10 +69,24 @@
 - [x] 附件预览和下载鉴权
 - [x] 报销明细关联发票的完整交互优化
 
+## Phase 4 Completion Checklist
+
+- [x] 审批流配置表
+- [x] 审批实例表
+- [x] 审批任务表
+- [x] 审批日志表
+- [x] 提交后创建默认主管审批实例和待办任务
+- [x] 审批人待办/已办列表
+- [x] 审批通过和驳回
+- [x] 已进入审批但尚未处理的报销单撤回到草稿并关闭待办任务
+- [x] 报销单详情展示审批实例、审批任务和审批日志
+- [x] Prisma migration 已在本地数据库确认
+- [x] 后端测试、前后端 lint 和 build 通过
+
 ## Next Phase
 
-- Phase: Phase 4 - Lightweight Approval Workflow
-- Trigger: Phase 3 已完成，下一步进入轻量审批流：审批实例、审批任务、提交后创建审批、主管审批和待办/已办列表。
+- Phase: Phase 5 - Expense Policy Control
+- Trigger: Phase 4 已完成，下一步进入费用政策管控：费用类型、政策规则、金额限制、发票要求和超标处理。
 
 ## Latest Progress
 
@@ -87,6 +101,8 @@
 - 2026-06-05: Phase 3 启动。新增 `exp_attachments` 和 `exp_invoices` 数据模型、迁移和权限；后端支持附件元数据登记/软删除、发票元数据登记/软删除、基于发票代码/号码/日期/价税合计/销方的重复校验；前端报销单详情弹窗已展示并维护附件与发票元数据。
 - 2026-06-05: Phase 3 继续。新增后端 `StorageModule` 和轻量 MinIO S3 V4 适配层，报销附件支持真实文件上传到 MinIO，并通过后端鉴权接口进行预览和下载；前端附件区域改为文件选择上传，附件列表新增预览、下载和删除操作。修复 bucket 初始化时空 body 导致 MinIO `MalformedXML` 的问题，真实 MinIO PUT/GET smoke 已通过，写入并读回 `phase3-minio-smoke`。
 - 2026-06-05: Phase 3 完成收口。报销单详情新增发票检查提示，覆盖未关联发票明细、重复发票和未关联明细发票；报销明细表新增发票状态列，发票录入时关联明细下拉展示明细金额和已关联票据情况，发票列表强化未关联明细与重复状态展示。`npm.cmd run build --workspace frontend` 和 `npm.cmd run lint --workspace frontend` 已通过。
+- 2026-06-05: Phase 4 完成。新增 `exp_approval_flow_configs`、`exp_approval_instances`、`exp_approval_tasks`、`exp_approval_logs` 数据模型、迁移和审批权限；提交报销单后自动创建默认主管审批实例和待办任务；审批人可在审批任务页查看待办/已办、打开报销详情并执行通过或驳回；撤回已提交但未处理的单据时同步关闭审批任务；报销单详情展示审批实例、任务和审批日志。`npm.cmd run test`、`npm.cmd run build --workspace backend`、`npm.cmd run build --workspace frontend`、`npm.cmd run lint --workspace backend`、`npm.cmd run lint --workspace frontend` 已通过，`npx.cmd prisma migrate deploy --schema backend/prisma/schema.prisma` 确认本地数据库无待应用迁移。
+- 2026-06-05: Phase 4 用户验收通过。手工测试覆盖关联发票后提交报销单、审批驳回和审批通过，流程未报错，确认 Phase 4 审批闭环完成。
 
 ## Phase History
 
@@ -96,6 +112,7 @@
 | Phase 1 - Identity And Basic Master Data | Done | 2026-06-02 | 2026-06-02 | User, role, permission, data scope, department, cost center, project, auth APIs, frontend management pages, permission list page, role permission display, migration, build, lint, tests, and browser smoke check verified. |
 | Phase 2 - Expense Report Core | Done | 2026-06-04 | 2026-06-04 | Draft/report models, APIs, withdraw, frontend workspace, detail view, filters, pagination, amount totals, status log, migration, API smoke, browser smoke, tests, lint, and build verified. |
 | Phase 3 - Attachments And Invoice Metadata | Done | 2026-06-04 | 2026-06-05 | Attachment metadata, MinIO upload, authorized preview/download, invoice metadata, duplicate invoice check, item-invoice association UX, tests, lint, build, and MinIO smoke verified. |
+| Phase 4 - Lightweight Approval Workflow | Done | 2026-06-05 | 2026-06-05 | Approval flow config, approval instances, approval tasks, approval logs, submit-created tasks, approve/reject, pending withdrawal closure, frontend approval task list, detail approval records, migration check, tests, lint, and build verified. |
 
 ## Update Rules
 

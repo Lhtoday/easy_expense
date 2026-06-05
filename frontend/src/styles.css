@@ -252,6 +252,13 @@ body {
   width: 100%;
 }
 
+.approval-expanded {
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;

@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   BankOutlined,
+  CheckCircleOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
@@ -50,8 +51,9 @@ type ApiResponse<T> = { success: boolean; data: T };
 type ApiErrorResponse = { success: false; error: { message: string } };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 type Status = 'ACTIVE' | 'DISABLED';
-type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'VOIDED';
-type ResourceKey = 'expense-reports' | 'users' | 'roles' | 'permissions' | 'departments' | 'cost-centers' | 'projects';
+type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'VOIDED';
+type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+type ResourceKey = 'expense-reports' | 'approvals' | 'users' | 'roles' | 'permissions' | 'departments' | 'cost-centers' | 'projects';
 
 interface SessionUser {
   name: string;
@@ -105,6 +107,7 @@ interface ExpenseReportRecord {
   logs?: ExpenseReportLogRecord[];
   attachments?: ExpenseAttachmentRecord[];
   invoices?: ExpenseInvoiceRecord[];
+  approvalInstances?: ExpenseApprovalInstanceRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -124,9 +127,41 @@ interface ExpenseReportItemRecord {
 
 interface ExpenseReportLogRecord {
   id: string;
-  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'VOID';
+  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'APPROVE' | 'REJECT' | 'VOID';
   fromStatus?: ExpenseStatus | null;
   toStatus: ExpenseStatus;
+  comment?: string | null;
+  createdAt: string;
+  operator: { id: string; name: string };
+}
+
+interface ApprovalTaskRecord {
+  id: string;
+  nodeCode: string;
+  nodeName: string;
+  status: ApprovalTaskStatus;
+  comment?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+  assignee: { id: string; name: string };
+  report: ExpenseReportRecord;
+}
+
+interface ExpenseApprovalInstanceRecord {
+  id: string;
+  status: 'IN_PROGRESS' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+  startedAt: string;
+  completedAt?: string | null;
+  flowConfig: { code: string; name: string };
+  tasks: Array<Omit<ApprovalTaskRecord, 'report'>>;
+  logs: ApprovalLogRecord[];
+}
+
+interface ApprovalLogRecord {
+  id: string;
+  action: 'CREATE' | 'APPROVE' | 'REJECT' | 'WITHDRAW';
+  fromStatus?: ApprovalTaskStatus | null;
+  toStatus?: ApprovalTaskStatus | null;
   comment?: string | null;
   createdAt: string;
   operator: { id: string; name: string };
@@ -216,6 +251,7 @@ const resources: Array<{
   writePermission: string;
 }> = [
   { key: 'expense-reports', label: '报销单', icon: <FileTextOutlined />, readPermission: 'exp:report:read', writePermission: 'exp:report:write' },
+  { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
   { key: 'users', label: '用户', icon: <TeamOutlined />, readPermission: 'iam:user:read', writePermission: 'iam:user:write' },
   { key: 'roles', label: '角色', icon: <SafetyOutlined />, readPermission: 'iam:role:read', writePermission: 'iam:role:write' },
   { key: 'permissions', label: '权限', icon: <KeyOutlined />, readPermission: 'iam:role:read', writePermission: 'iam:role:write' },
@@ -246,7 +282,16 @@ const expenseTypeOptions = [
 const expenseStatusOptions: Array<{ label: string; value: ExpenseStatus }> = [
   { label: '草稿', value: 'DRAFT' },
   { label: '已提交', value: 'SUBMITTED' },
+  { label: '已通过', value: 'APPROVED' },
+  { label: '已驳回', value: 'REJECTED' },
   { label: '已作废', value: 'VOIDED' },
+];
+
+const approvalTaskStatusOptions: Array<{ label: string; value: ApprovalTaskStatus }> = [
+  { label: '待处理', value: 'PENDING' },
+  { label: '已通过', value: 'APPROVED' },
+  { label: '已驳回', value: 'REJECTED' },
+  { label: '已撤回', value: 'WITHDRAWN' },
 ];
 
 function getToken() {
@@ -287,6 +332,10 @@ export function App() {
   const [expenseStatus, setExpenseStatus] = useState<ExpenseStatus | undefined>();
   const [expensePage, setExpensePage] = useState(1);
   const [expensePageSize, setExpensePageSize] = useState(10);
+  const [approvalKeyword, setApprovalKeyword] = useState('');
+  const [approvalStatus, setApprovalStatus] = useState<ApprovalTaskStatus | undefined>('PENDING');
+  const [approvalPage, setApprovalPage] = useState(1);
+  const [approvalPageSize, setApprovalPageSize] = useState(10);
   const [form] = Form.useForm();
   const [expenseForm] = Form.useForm<ExpenseFormValues>();
   const queryClient = useQueryClient();
@@ -331,6 +380,7 @@ export function App() {
   const currentResource = resources.find((resource) => resource.key === activeResource) ?? resources[0];
   const canWrite = activeResource !== 'permissions' && (me?.permissions.includes(currentResource.writePermission) ?? false);
   const canWithdrawExpense = me?.permissions.includes('exp:report:withdraw') ?? false;
+  const canApprove = me?.permissions.includes('exp:approval:approve') ?? false;
 
   const listQuery = useQuery<PageResult<BaseRecord>>({
     queryKey: [activeResource],
@@ -351,7 +401,7 @@ export function App() {
       });
       return response.data.data;
     },
-    enabled: Boolean(me) && activeResource !== 'expense-reports',
+    enabled: Boolean(me) && activeResource !== 'expense-reports' && activeResource !== 'approvals',
   });
 
   const expenseListQuery = useQuery<PageResult<ExpenseReportRecord>>({
@@ -364,6 +414,18 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'expense-reports',
+  });
+
+  const approvalTasksQuery = useQuery<PageResult<ApprovalTaskRecord>>({
+    queryKey: ['approvals', approvalPage, approvalPageSize, approvalKeyword, approvalStatus],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ApprovalTaskRecord>>>('/approvals/tasks', {
+        headers: authHeaders(),
+        params: { page: approvalPage, pageSize: approvalPageSize, keyword: approvalKeyword || undefined, status: approvalStatus },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'approvals',
   });
 
   const permissionsQuery = useQuery({
@@ -453,6 +515,20 @@ export function App() {
     onError: () => messageApi.error('作废失败，仅草稿可以作废'),
   });
 
+  const handleApprovalMutation = useMutation({
+    mutationFn: async ({ taskId, action, comment }: { taskId: string; action: 'approve' | 'reject'; comment?: string }) =>
+      api.post(`/approvals/tasks/${taskId}/${action}`, { comment }, { headers: authHeaders() }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      if (expenseViewing) {
+        await refreshExpenseDetail(expenseViewing.id);
+      }
+      messageApi.success('审批已处理');
+    },
+    onError: (error) => messageApi.error(apiErrorMessage(error, '审批处理失败，请检查任务状态或权限')),
+  });
+
   const loginMutation = useMutation({
     mutationFn: async (values: { email: string; password: string }) => {
       const response = await api.post<ApiResponse<{ accessToken: string; user: SessionUser }>>('/auth/login', values);
@@ -501,6 +577,25 @@ export function App() {
     await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
   }
 
+  function openApprovalConfirm(task: ApprovalTaskRecord, action: 'approve' | 'reject') {
+    let comment = '';
+    Modal.confirm({
+      title: action === 'approve' ? '通过审批' : '驳回审批',
+      content: (
+        <Input.TextArea
+          rows={3}
+          placeholder="审批意见"
+          onChange={(event) => {
+            comment = event.target.value;
+          }}
+        />
+      ),
+      okText: action === 'approve' ? '通过' : '驳回',
+      okButtonProps: { danger: action === 'reject' },
+      onOk: () => handleApprovalMutation.mutate({ taskId: task.id, action, comment: comment.trim() || undefined }),
+    });
+  }
+
   if (sessionToken && loadingMe) {
     return (
       <Layout className="login-shell">
@@ -546,7 +641,7 @@ export function App() {
           <div className="brand-mark">EF</div>
           <div>
             <Text className="brand-title">ExpenseFlow</Text>
-            <Text className="brand-subtitle">Phase 3</Text>
+            <Text className="brand-subtitle">Phase 4</Text>
           </div>
         </div>
         <Menu
@@ -559,7 +654,9 @@ export function App() {
         <Header className="app-header">
           <div>
             <Text className="page-title">{currentResource.label}管理</Text>
-            <Text className="page-subtitle">{activeResource === 'expense-reports' ? '草稿、明细和提交状态' : '身份、权限和主数据'}</Text>
+            <Text className="page-subtitle">
+              {activeResource === 'expense-reports' ? '草稿、明细和审批状态' : activeResource === 'approvals' ? '待办、已办和审批记录' : '身份、权限和主数据'}
+            </Text>
           </div>
           <Select
             className="mobile-nav"
@@ -610,6 +707,31 @@ export function App() {
               onView={(record) => void openExpenseDetail(record)}
               onWithdraw={(record) => withdrawExpenseMutation.mutate(record.id)}
               onVoid={(record) => voidExpenseMutation.mutate(record.id)}
+            />
+          ) : activeResource === 'approvals' ? (
+            <ApprovalTasksView
+              canApprove={canApprove}
+              data={approvalTasksQuery.data}
+              keyword={approvalKeyword}
+              loading={approvalTasksQuery.isLoading || handleApprovalMutation.isPending}
+              page={approvalPage}
+              pageSize={approvalPageSize}
+              status={approvalStatus}
+              onApprove={(task) => openApprovalConfirm(task, 'approve')}
+              onPageChange={(page, pageSize) => {
+                setApprovalPage(page);
+                setApprovalPageSize(pageSize);
+              }}
+              onReject={(task) => openApprovalConfirm(task, 'reject')}
+              onSearch={(keyword) => {
+                setApprovalKeyword(keyword.trim());
+                setApprovalPage(1);
+              }}
+              onStatusChange={(status) => {
+                setApprovalStatus(status);
+                setApprovalPage(1);
+              }}
+              onViewReport={(task) => void openExpenseDetail(task.report)}
             />
           ) : (
             <MasterDataView
@@ -772,6 +894,101 @@ function ExpenseReportsView({
   );
 }
 
+function ApprovalTasksView({
+  canApprove,
+  data,
+  keyword,
+  loading,
+  page,
+  pageSize,
+  status,
+  onApprove,
+  onPageChange,
+  onReject,
+  onSearch,
+  onStatusChange,
+  onViewReport,
+}: {
+  canApprove: boolean;
+  data?: PageResult<ApprovalTaskRecord>;
+  keyword: string;
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  status?: ApprovalTaskStatus;
+  onApprove: (task: ApprovalTaskRecord) => void;
+  onPageChange: (page: number, pageSize: number) => void;
+  onReject: (task: ApprovalTaskRecord) => void;
+  onSearch: (keyword: string) => void;
+  onStatusChange: (status?: ApprovalTaskStatus) => void;
+  onViewReport: (task: ApprovalTaskRecord) => void;
+}) {
+  return (
+    <>
+      <div className="table-toolbar">
+        <Space className="expense-filters">
+          <Input.Search defaultValue={keyword} placeholder="搜索单号或标题" allowClear onSearch={onSearch} />
+          <Select
+            allowClear
+            placeholder="任务状态"
+            value={status}
+            options={approvalTaskStatusOptions}
+            onChange={(value) => onStatusChange(value)}
+            className="expense-status-filter"
+          />
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        loading={loading}
+        dataSource={data?.items ?? []}
+        columns={approvalTaskColumns(canApprove, onApprove, onReject, onViewReport)}
+        scroll={{ x: 1180 }}
+        pagination={{ current: page, pageSize, total: data?.total, showSizeChanger: true }}
+        onChange={(pagination) => onPageChange(pagination.current ?? 1, pagination.pageSize ?? pageSize)}
+      />
+    </>
+  );
+}
+
+function approvalTaskColumns(
+  canApprove: boolean,
+  onApprove: (task: ApprovalTaskRecord) => void,
+  onReject: (task: ApprovalTaskRecord) => void,
+  onViewReport: (task: ApprovalTaskRecord) => void,
+): ColumnsType<ApprovalTaskRecord> {
+  return [
+    { title: '任务', dataIndex: 'nodeName', width: 120 },
+    { title: '状态', dataIndex: 'status', width: 110, render: (status: ApprovalTaskStatus) => <ApprovalTaskStatusTag status={status} /> },
+    { title: '单号', dataIndex: ['report', 'reportNo'], width: 170 },
+    { title: '标题', dataIndex: ['report', 'title'], width: 180 },
+    { title: '申请人', dataIndex: ['report', 'applicant'], width: 120, render: (applicant?: ExpenseReportRecord['applicant']) => applicant?.name ?? '-' },
+    { title: '报销状态', dataIndex: ['report', 'status'], width: 110, render: (status: ExpenseStatus) => <ExpenseStatusTag status={status} /> },
+    { title: '可报销金额', dataIndex: ['report', 'reimbursableCents'], width: 130, align: 'right', render: formatMoney },
+    { title: '成本中心', dataIndex: ['report', 'costCenter'], width: 160, render: (costCenter?: ExpenseReportRecord['costCenter']) => costCenter?.name ?? '-' },
+    { title: '提交时间', dataIndex: ['report', 'submittedAt'], width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    { title: '完成时间', dataIndex: 'completedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    {
+      title: '操作',
+      width: 230,
+      fixed: 'right',
+      render: (_: unknown, task) => (
+        <Space>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => onViewReport(task)}>
+            查看
+          </Button>
+          <Button size="small" type="primary" disabled={!canApprove || task.status !== 'PENDING'} onClick={() => onApprove(task)}>
+            通过
+          </Button>
+          <Button size="small" danger disabled={!canApprove || task.status !== 'PENDING'} onClick={() => onReject(task)}>
+            驳回
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+}
+
 function expenseColumns(
   canWrite: boolean,
   canWithdraw: boolean,
@@ -821,16 +1038,16 @@ function expenseColumns(
           <Button size="small" icon={<EyeOutlined />} onClick={() => onView(record)}>
             查看
           </Button>
-          <Button size="small" disabled={!canWrite || record.status !== 'DRAFT'} onClick={() => onEdit(record)}>
+          <Button size="small" disabled={!canWrite || !isEditableExpenseStatus(record.status)} onClick={() => onEdit(record)}>
             编辑
           </Button>
-          <Button size="small" icon={<SendOutlined />} disabled={!canWrite || record.status !== 'DRAFT'} onClick={() => onSubmit(record)}>
+          <Button size="small" icon={<SendOutlined />} disabled={!canWrite || !isEditableExpenseStatus(record.status)} onClick={() => onSubmit(record)}>
             提交
           </Button>
           <Button size="small" disabled={!canWithdraw || record.status !== 'SUBMITTED'} onClick={() => onWithdraw(record)}>
             撤回
           </Button>
-          <Button size="small" danger disabled={!canWrite || record.status !== 'DRAFT'} onClick={() => onVoid(record)}>
+          <Button size="small" danger disabled={!canWrite || !isEditableExpenseStatus(record.status)} onClick={() => onVoid(record)}>
             作废
           </Button>
         </Space>
@@ -993,7 +1210,7 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
     onError: () => message.error('发票删除失败'),
   });
 
-  const editable = canWrite && record.status === 'DRAFT';
+  const editable = canWrite && isEditableExpenseStatus(record.status);
   const invoiceSummary = buildInvoiceSummary(record.items ?? [], record.invoices ?? []);
   const invoiceItemOptions = (record.items ?? []).map((item, index) => {
     const summary = invoiceSummary.byItemId.get(item.id ?? '');
@@ -1169,6 +1386,38 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
         scroll={{ x: 760 }}
         size="small"
       />
+
+      <Divider orientation="left">审批记录</Divider>
+      <Table
+        rowKey="id"
+        dataSource={record.approvalInstances ?? []}
+        columns={approvalInstanceColumns()}
+        expandable={{
+          expandedRowRender: (instance) => (
+            <div className="approval-expanded">
+              <Table
+                rowKey="id"
+                dataSource={instance.tasks}
+                columns={approvalTaskDetailColumns()}
+                pagination={false}
+                size="small"
+                scroll={{ x: 760 }}
+              />
+              <Table
+                rowKey="id"
+                dataSource={instance.logs}
+                columns={approvalLogColumns()}
+                pagination={false}
+                size="small"
+                scroll={{ x: 760 }}
+              />
+            </div>
+          ),
+        }}
+        pagination={false}
+        scroll={{ x: 860 }}
+        size="small"
+      />
     </div>
   );
 }
@@ -1339,6 +1588,54 @@ function expenseLogColumns(): ColumnsType<ExpenseReportLogRecord> {
   ];
 }
 
+function approvalInstanceColumns(): ColumnsType<ExpenseApprovalInstanceRecord> {
+  return [
+    { title: '流程', dataIndex: 'flowConfig', width: 180, render: (flow: ExpenseApprovalInstanceRecord['flowConfig']) => flow.name },
+    { title: '状态', dataIndex: 'status', width: 120, render: approvalInstanceStatusName },
+    { title: '开始时间', dataIndex: 'startedAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    { title: '完成时间', dataIndex: 'completedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    {
+      title: '当前任务',
+      width: 240,
+      render: (_: unknown, instance) => {
+        const pending = instance.tasks.find((task) => task.status === 'PENDING');
+        return pending ? `${pending.nodeName} · ${pending.assignee.name}` : '-';
+      },
+    },
+  ];
+}
+
+function approvalTaskDetailColumns(): ColumnsType<Omit<ApprovalTaskRecord, 'report'>> {
+  return [
+    { title: '节点', dataIndex: 'nodeName', width: 140 },
+    { title: '审批人', dataIndex: 'assignee', width: 120, render: (assignee: ApprovalTaskRecord['assignee']) => assignee.name },
+    { title: '状态', dataIndex: 'status', width: 120, render: (status: ApprovalTaskStatus) => <ApprovalTaskStatusTag status={status} /> },
+    { title: '创建时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    { title: '完成时间', dataIndex: 'completedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    { title: '意见', dataIndex: 'comment', width: 220, render: (comment?: string | null) => comment ?? '-' },
+  ];
+}
+
+function approvalLogColumns(): ColumnsType<ApprovalLogRecord> {
+  return [
+    { title: '时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    { title: '操作人', dataIndex: 'operator', width: 120, render: (operator: ApprovalLogRecord['operator']) => operator.name },
+    { title: '动作', dataIndex: 'action', width: 120, render: approvalActionName },
+    {
+      title: '任务状态',
+      width: 180,
+      render: (_: unknown, record) => (
+        <Space>
+          {record.fromStatus ? <ApprovalTaskStatusTag status={record.fromStatus} /> : <Text type="secondary">初始</Text>}
+          <Text type="secondary">→</Text>
+          {record.toStatus ? <ApprovalTaskStatusTag status={record.toStatus} /> : <Text type="secondary">-</Text>}
+        </Space>
+      ),
+    },
+    { title: '意见', dataIndex: 'comment', width: 220, render: (comment?: string | null) => comment ?? '-' },
+  ];
+}
+
 function MoneyField({ name, label }: { name: Array<string | number>; label: string }) {
   return (
     <Form.Item
@@ -1358,9 +1655,35 @@ function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
   const config = {
     DRAFT: { color: 'default', label: '草稿' },
     SUBMITTED: { color: 'processing', label: '已提交' },
+    APPROVED: { color: 'success', label: '已通过' },
+    REJECTED: { color: 'warning', label: '已驳回' },
     VOIDED: { color: 'error', label: '已作废' },
   }[status];
   return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function isEditableExpenseStatus(status: ExpenseStatus) {
+  return status === 'DRAFT' || status === 'REJECTED';
+}
+
+function ApprovalTaskStatusTag({ status }: { status: ApprovalTaskStatus }) {
+  const config = {
+    PENDING: { color: 'processing', label: '待处理' },
+    APPROVED: { color: 'success', label: '已通过' },
+    REJECTED: { color: 'error', label: '已驳回' },
+    WITHDRAWN: { color: 'default', label: '已撤回' },
+  }[status];
+  return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function approvalInstanceStatusName(status: ExpenseApprovalInstanceRecord['status']) {
+  const names = {
+    IN_PROGRESS: '审批中',
+    APPROVED: '已通过',
+    REJECTED: '已驳回',
+    WITHDRAWN: '已撤回',
+  };
+  return names[status];
 }
 
 function expenseTypeName(code?: string) {
@@ -1383,7 +1706,19 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     UPDATE: '更新草稿',
     SUBMIT: '提交',
     WITHDRAW: '撤回',
+    APPROVE: '审批通过',
+    REJECT: '审批驳回',
     VOID: '作废',
+  };
+  return names[action];
+}
+
+function approvalActionName(action: ApprovalLogRecord['action']) {
+  const names = {
+    CREATE: '创建任务',
+    APPROVE: '通过',
+    REJECT: '驳回',
+    WITHDRAW: '撤回',
   };
   return names[action];
 }

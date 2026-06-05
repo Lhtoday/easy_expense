@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { ExpenseAttachmentCategory, ExpenseReportStatus } from '@prisma/client';
+import { ApprovalFlowConfigStatus, ExpenseAttachmentCategory, ExpenseReportStatus } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { ExpenseReportsService } from './expense-reports.service';
@@ -91,6 +91,90 @@ describe('ExpenseReportsService', () => {
     await expect(service.submit(user, 'report_1')).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('creates an approval task when submitting a valid draft', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.DRAFT,
+          currency: 'CNY',
+          departmentId: null,
+          costCenterId: null,
+          reimbursableCents: 12050,
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED }),
+      },
+      expenseReportItem: { count: vi.fn().mockResolvedValue(1) },
+      expenseApprovalFlowConfig: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'flow_1', approverRoleCode: 'ADMIN' }),
+      },
+      user: { findFirst: vi.fn().mockResolvedValue({ id: 'approver_1' }) },
+      expenseApprovalInstance: {
+        create: vi.fn().mockResolvedValue({ id: 'instance_1', tasks: [{ id: 'task_1' }] }),
+      },
+      expenseApprovalLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(service.submit(user, 'report_1')).resolves.toEqual({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED });
+    expect(tx.expenseApprovalFlowConfig.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: ApprovalFlowConfigStatus.ACTIVE }) }),
+    );
+    expect(tx.expenseApprovalInstance.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          reportId: 'report_1',
+          tasks: { create: expect.objectContaining({ nodeCode: 'MANAGER_APPROVAL', assigneeId: 'approver_1' }) },
+        }),
+      }),
+    );
+  });
+
+  it('allows rejected reports to be submitted again with a new approval task', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.REJECTED,
+          currency: 'CNY',
+          departmentId: null,
+          costCenterId: null,
+          reimbursableCents: 12050,
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED }),
+      },
+      expenseReportItem: { count: vi.fn().mockResolvedValue(1) },
+      expenseApprovalFlowConfig: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'flow_1', approverRoleCode: 'ADMIN' }),
+      },
+      user: { findFirst: vi.fn().mockResolvedValue({ id: 'approver_1' }) },
+      expenseApprovalInstance: {
+        create: vi.fn().mockResolvedValue({ id: 'instance_2', tasks: [{ id: 'task_2' }] }),
+      },
+      expenseApprovalLog: { create: vi.fn().mockResolvedValue({ id: 'log_2' }) },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(service.submit(user, 'report_1', '修改后重新提交')).resolves.toEqual({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED });
+    expect(tx.expenseReport.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          logs: expect.objectContaining({
+            create: expect.objectContaining({
+              fromStatus: ExpenseReportStatus.REJECTED,
+              toStatus: ExpenseReportStatus.SUBMITTED,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(tx.expenseApprovalInstance.create).toHaveBeenCalled();
+  });
+
   it('withdraws own submitted report back to draft with audit log', async () => {
     const tx = {
       expenseReport: {
@@ -100,6 +184,16 @@ describe('ExpenseReportsService', () => {
           applicantId: user.id,
         }),
         update: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.DRAFT }),
+      },
+      expenseApprovalInstance: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'instance_1', tasks: [{ id: 'task_1' }] }),
+        update: vi.fn().mockResolvedValue({ id: 'instance_1' }),
+      },
+      expenseApprovalTask: {
+        update: vi.fn().mockResolvedValue({ id: 'task_1' }),
+      },
+      expenseApprovalLog: {
+        create: vi.fn().mockResolvedValue({ id: 'approval_log_1' }),
       },
     };
     const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
@@ -119,6 +213,12 @@ describe('ExpenseReportsService', () => {
             }),
           }),
         }),
+      }),
+    );
+    expect(tx.expenseApprovalTask.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'task_1' },
+        data: expect.objectContaining({ status: 'WITHDRAWN', comment: '填错金额' }),
       }),
     );
   });

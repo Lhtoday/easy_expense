@@ -1,5 +1,16 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { ExpenseAttachmentCategory, ExpenseReportAction, ExpenseReportStatus, InvoiceDuplicateStatus, Prisma } from '@prisma/client';
+import {
+  ApprovalAction,
+  ApprovalFlowConfigStatus,
+  ApprovalInstanceStatus,
+  ApprovalTaskStatus,
+  ExpenseAttachmentCategory,
+  ExpenseReportAction,
+  ExpenseReportStatus,
+  InvoiceDuplicateStatus,
+  Prisma,
+  UserStatus,
+} from '@prisma/client';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
@@ -139,7 +150,7 @@ export class ExpenseReportsService {
         throw new BadRequestException('提交前至少需要一条可报销金额大于 0 的明细');
       }
 
-      return tx.expenseReport.update({
+      const report = await tx.expenseReport.update({
         where: { id },
         data: {
           status: ExpenseReportStatus.SUBMITTED,
@@ -149,7 +160,7 @@ export class ExpenseReportsService {
             create: {
               operatorId: user.id,
               action: ExpenseReportAction.SUBMIT,
-              fromStatus: ExpenseReportStatus.DRAFT,
+              fromStatus: existing.status,
               toStatus: ExpenseReportStatus.SUBMITTED,
               comment,
             },
@@ -157,6 +168,8 @@ export class ExpenseReportsService {
         },
         select: this.detailSelect(),
       });
+      await this.createApprovalInstance(tx, report.id, user);
+      return tx.expenseReport.findUnique({ where: { id }, select: this.detailSelect() });
     });
   }
 
@@ -191,6 +204,7 @@ export class ExpenseReportsService {
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await this.ensureWithdrawable(tx, id, user);
+      await this.withdrawPendingApproval(tx, id, user.id, comment ?? '申请人撤回报销单');
       return tx.expenseReport.update({
         where: { id },
         data: {
@@ -457,11 +471,102 @@ export class ExpenseReportsService {
     if (!report) {
       throw new NotFoundException('报销单不存在');
     }
-    if (report.status !== ExpenseReportStatus.DRAFT) {
-      throw new BadRequestException('只有草稿状态的报销单可以编辑或提交');
+    if (report.status !== ExpenseReportStatus.DRAFT && report.status !== ExpenseReportStatus.REJECTED) {
+      throw new BadRequestException('只有草稿或已驳回状态的报销单可以编辑或提交');
     }
 
     return report;
+  }
+
+  private async createApprovalInstance(tx: Prisma.TransactionClient, reportId: string, user: AuthenticatedUser) {
+    const flow = await tx.expenseApprovalFlowConfig.findFirst({
+      where: { code: 'DEFAULT_EXPENSE_APPROVAL', status: ApprovalFlowConfigStatus.ACTIVE },
+      select: { id: true, approverRoleCode: true },
+    });
+    if (!flow) {
+      throw new BadRequestException('未配置可用的报销审批流');
+    }
+
+    const assignee = await tx.user.findFirst({
+      where: {
+        deletedAt: null,
+        status: UserStatus.ACTIVE,
+        roles: { some: { role: { code: flow.approverRoleCode, status: 'ACTIVE', deletedAt: null } } },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!assignee) {
+      throw new BadRequestException('未找到可用的报销审批人');
+    }
+
+    const instance = await tx.expenseApprovalInstance.create({
+      data: {
+        reportId,
+        flowConfigId: flow.id,
+        startedById: user.id,
+        tasks: {
+          create: {
+            reportId,
+            nodeCode: 'MANAGER_APPROVAL',
+            nodeName: '主管审批',
+            assigneeId: assignee.id,
+          },
+        },
+      },
+      select: { id: true, tasks: { select: { id: true } } },
+    });
+    await tx.expenseApprovalLog.create({
+      data: {
+        instanceId: instance.id,
+        taskId: instance.tasks[0]?.id,
+        operatorId: user.id,
+        action: ApprovalAction.CREATE,
+        toStatus: ApprovalTaskStatus.PENDING,
+        comment: '提交后创建主管审批任务',
+      },
+    });
+  }
+
+  private async withdrawPendingApproval(tx: Prisma.TransactionClient, reportId: string, operatorId: string, comment: string) {
+    const instance = await tx.expenseApprovalInstance.findFirst({
+      where: { reportId, status: ApprovalInstanceStatus.IN_PROGRESS },
+      select: {
+        id: true,
+        tasks: {
+          where: { status: ApprovalTaskStatus.PENDING },
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!instance) {
+      return;
+    }
+    if (instance.tasks.length !== 1) {
+      throw new BadRequestException('审批已处理，不能撤回到草稿');
+    }
+
+    const taskId = instance.tasks[0].id;
+    await tx.expenseApprovalTask.update({
+      where: { id: taskId },
+      data: { status: ApprovalTaskStatus.WITHDRAWN, comment, completedAt: new Date() },
+    });
+    await tx.expenseApprovalInstance.update({
+      where: { id: instance.id },
+      data: { status: ApprovalInstanceStatus.WITHDRAWN, completedAt: new Date() },
+    });
+    await tx.expenseApprovalLog.create({
+      data: {
+        instanceId: instance.id,
+        taskId,
+        operatorId,
+        action: ApprovalAction.WITHDRAW,
+        fromStatus: ApprovalTaskStatus.PENDING,
+        toStatus: ApprovalTaskStatus.WITHDRAWN,
+        comment,
+      },
+    });
   }
 
   private async ensureWithdrawable(tx: Prisma.TransactionClient, id: string, user: AuthenticatedUser) {
@@ -558,6 +663,41 @@ export class ExpenseReportsService {
         where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },
         select: this.invoiceSelect(),
+      },
+      approvalInstances: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          flowConfig: { select: { code: true, name: true } },
+          tasks: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              nodeCode: true,
+              nodeName: true,
+              status: true,
+              comment: true,
+              createdAt: true,
+              completedAt: true,
+              assignee: { select: { id: true, name: true } },
+            },
+          },
+          logs: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              action: true,
+              fromStatus: true,
+              toStatus: true,
+              comment: true,
+              createdAt: true,
+              operator: { select: { id: true, name: true } },
+            },
+          },
+        },
       },
     } satisfies Prisma.ExpenseReportSelect;
   }

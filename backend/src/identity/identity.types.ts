@@ -12,6 +12,8 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'exp:report:read', name: '查看报销单', description: '查看报销单列表和详情' },
   { code: 'exp:report:write', name: '维护报销单', description: '创建、编辑、提交和作废报销单' },
   { code: 'exp:report:withdraw', name: '撤回报销单', description: '撤回本人已提交且尚未进入审批处理的报销单' },
+  { code: 'exp:approval:read', name: '查看审批任务', description: '查看报销审批待办、已办和审批记录' },
+  { code: 'exp:approval:approve', name: '处理报销审批', description: '通过或驳回报销审批任务' },
 ];
 
 export interface AuthenticatedUser {

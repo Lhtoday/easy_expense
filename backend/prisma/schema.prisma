@@ -42,6 +42,8 @@ enum DataScopeType {
 enum ExpenseReportStatus {
   DRAFT
   SUBMITTED
+  APPROVED
+  REJECTED
   VOIDED
 }
 
@@ -50,7 +52,35 @@ enum ExpenseReportAction {
   UPDATE
   SUBMIT
   WITHDRAW
+  APPROVE
+  REJECT
   VOID
+}
+
+enum ApprovalFlowConfigStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ApprovalInstanceStatus {
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ApprovalTaskStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ApprovalAction {
+  CREATE
+  APPROVE
+  REJECT
+  WITHDRAW
 }
 
 enum ExpenseAttachmentCategory {
@@ -85,6 +115,8 @@ model User {
   reportLogs     ExpenseReportLog[]
   uploadedAttachments ExpenseAttachment[] @relation("ExpenseAttachmentUploader")
   invoiceCreatedBy ExpenseInvoice[]       @relation("ExpenseInvoiceCreator")
+  assignedApprovalTasks ExpenseApprovalTask[] @relation("ApprovalTaskAssignee")
+  operatedApprovalLogs  ExpenseApprovalLog[]  @relation("ApprovalLogOperator")
 
   @@map("iam_users")
 }
@@ -249,12 +281,90 @@ model ExpenseReport {
   logs                  ExpenseReportLog[]
   attachments           ExpenseAttachment[]
   invoices              ExpenseInvoice[]
+  approvalInstances     ExpenseApprovalInstance[]
+  approvalTasks         ExpenseApprovalTask[]
 
   @@index([applicantId, status])
   @@index([departmentId])
   @@index([costCenterId])
   @@index([projectId])
   @@map("exp_reports")
+}
+
+model ExpenseApprovalFlowConfig {
+  id            String                   @id @default(cuid())
+  code          String                   @unique
+  name          String
+  description   String?
+  approverRoleCode String                @map("approver_role_code")
+  status        ApprovalFlowConfigStatus @default(ACTIVE)
+  createdAt     DateTime                 @default(now()) @map("created_at")
+  updatedAt     DateTime                 @updatedAt @map("updated_at")
+  instances     ExpenseApprovalInstance[]
+
+  @@map("exp_approval_flow_configs")
+}
+
+model ExpenseApprovalInstance {
+  id          String                 @id @default(cuid())
+  reportId    String                 @map("report_id")
+  flowConfigId String                @map("flow_config_id")
+  status      ApprovalInstanceStatus @default(IN_PROGRESS)
+  startedById String                 @map("started_by")
+  startedAt   DateTime               @default(now()) @map("started_at")
+  completedAt DateTime?              @map("completed_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+  report      ExpenseReport          @relation(fields: [reportId], references: [id])
+  flowConfig  ExpenseApprovalFlowConfig @relation(fields: [flowConfigId], references: [id])
+  tasks       ExpenseApprovalTask[]
+  logs        ExpenseApprovalLog[]
+
+  @@index([reportId, status])
+  @@index([flowConfigId])
+  @@map("exp_approval_instances")
+}
+
+model ExpenseApprovalTask {
+  id          String             @id @default(cuid())
+  instanceId  String             @map("instance_id")
+  reportId    String             @map("report_id")
+  nodeCode    String             @map("node_code")
+  nodeName    String             @map("node_name")
+  assigneeId  String             @map("assignee_id")
+  status      ApprovalTaskStatus @default(PENDING)
+  comment     String?
+  createdAt   DateTime           @default(now()) @map("created_at")
+  completedAt DateTime?          @map("completed_at")
+  instance    ExpenseApprovalInstance @relation(fields: [instanceId], references: [id])
+  report      ExpenseReport      @relation(fields: [reportId], references: [id])
+  assignee    User               @relation("ApprovalTaskAssignee", fields: [assigneeId], references: [id])
+  logs        ExpenseApprovalLog[]
+
+  @@index([assigneeId, status])
+  @@index([reportId])
+  @@index([instanceId])
+  @@map("exp_approval_tasks")
+}
+
+model ExpenseApprovalLog {
+  id          String         @id @default(cuid())
+  instanceId  String         @map("instance_id")
+  taskId      String?        @map("task_id")
+  operatorId  String         @map("operator_id")
+  action      ApprovalAction
+  fromStatus  ApprovalTaskStatus? @map("from_status")
+  toStatus    ApprovalTaskStatus? @map("to_status")
+  comment     String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  instance    ExpenseApprovalInstance @relation(fields: [instanceId], references: [id])
+  task        ExpenseApprovalTask?    @relation(fields: [taskId], references: [id])
+  operator    User           @relation("ApprovalLogOperator", fields: [operatorId], references: [id])
+
+  @@index([instanceId])
+  @@index([taskId])
+  @@index([operatorId])
+  @@map("exp_approval_logs")
 }
 
 model ExpenseReportItem {
