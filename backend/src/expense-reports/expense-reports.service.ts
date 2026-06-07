@@ -11,6 +11,7 @@ import {
   Prisma,
   UserStatus,
 } from '@prisma/client';
+import { ExpensePoliciesService } from '../expense-policies/expense-policies.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
@@ -29,6 +30,7 @@ export class ExpenseReportsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly storage?: MinioStorageService,
+    @Optional() private readonly expensePolicies?: ExpensePoliciesService,
   ) {}
 
   async list(user: AuthenticatedUser, query: ExpenseReportListQueryDto): Promise<PageResult<unknown>> {
@@ -150,6 +152,11 @@ export class ExpenseReportsService {
         throw new BadRequestException('提交前至少需要一条可报销金额大于 0 的明细');
       }
 
+      const policyFindings = this.expensePolicies ? await this.expensePolicies.evaluateAndStore(tx, id) : [];
+      if (this.expensePolicies?.hasBlockingFinding(policyFindings)) {
+        throw new BadRequestException(this.expensePolicies.blockingMessage(policyFindings));
+      }
+
       const report = await tx.expenseReport.update({
         where: { id },
         data: {
@@ -168,7 +175,7 @@ export class ExpenseReportsService {
         },
         select: this.detailSelect(),
       });
-      await this.createApprovalInstance(tx, report.id, user);
+      await this.createApprovalInstance(tx, report.id, user, this.expensePolicies?.requiresEscalation(policyFindings) ?? false);
       return tx.expenseReport.findUnique({ where: { id }, select: this.detailSelect() });
     });
   }
@@ -354,7 +361,7 @@ export class ExpenseReportsService {
         select: { id: true },
       });
 
-      return tx.expenseInvoice.create({
+      const invoice = await tx.expenseInvoice.create({
         data: {
           reportId,
           itemId: dto.itemId,
@@ -376,6 +383,10 @@ export class ExpenseReportsService {
         },
         select: this.invoiceSelect(),
       });
+      if (this.expensePolicies) {
+        await this.expensePolicies.evaluateAndStore(tx, reportId);
+      }
+      return invoice;
     });
   }
 
@@ -478,9 +489,10 @@ export class ExpenseReportsService {
     return report;
   }
 
-  private async createApprovalInstance(tx: Prisma.TransactionClient, reportId: string, user: AuthenticatedUser) {
+  private async createApprovalInstance(tx: Prisma.TransactionClient, reportId: string, user: AuthenticatedUser, escalated: boolean) {
+    const flowCode = escalated ? 'ESCALATED_EXPENSE_APPROVAL' : 'DEFAULT_EXPENSE_APPROVAL';
     const flow = await tx.expenseApprovalFlowConfig.findFirst({
-      where: { code: 'DEFAULT_EXPENSE_APPROVAL', status: ApprovalFlowConfigStatus.ACTIVE },
+      where: { code: flowCode, status: ApprovalFlowConfigStatus.ACTIVE },
       select: { id: true, approverRoleCode: true },
     });
     if (!flow) {
@@ -508,7 +520,7 @@ export class ExpenseReportsService {
         tasks: {
           create: {
             reportId,
-            nodeCode: 'MANAGER_APPROVAL',
+            nodeCode: escalated ? 'POLICY_ESCALATION_APPROVAL' : 'MANAGER_APPROVAL',
             nodeName: '主管审批',
             assigneeId: assignee.id,
           },
@@ -697,6 +709,18 @@ export class ExpenseReportsService {
               operator: { select: { id: true, name: true } },
             },
           },
+        },
+      },
+      policyChecks: {
+        orderBy: [{ result: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          itemId: true,
+          result: true,
+          message: true,
+          createdAt: true,
+          policy: { select: { id: true, code: true, name: true } },
+          rule: { select: { id: true, code: true, name: true, action: true } },
         },
       },
     } satisfies Prisma.ExpenseReportSelect;

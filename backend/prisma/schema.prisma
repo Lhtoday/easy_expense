@@ -95,6 +95,24 @@ enum InvoiceDuplicateStatus {
   DUPLICATE
 }
 
+enum ExpensePolicyStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ExpensePolicyAction {
+  WARNING
+  BLOCK
+  ESCALATE
+}
+
+enum ExpensePolicyCheckResult {
+  PASS
+  WARNING
+  BLOCK
+  ESCALATE
+}
+
 model User {
   id             String             @id @default(cuid())
   employeeNo     String             @unique @map("employee_no")
@@ -252,6 +270,20 @@ model Project {
   @@map("md_projects")
 }
 
+model ExpenseType {
+  id                        String           @id @default(cuid())
+  code                      String           @unique
+  name                      String
+  description               String?
+  status                    MasterDataStatus @default(ACTIVE)
+  defaultAccountSubjectCode String?          @map("default_account_subject_code")
+  createdAt                 DateTime         @default(now()) @map("created_at")
+  updatedAt                 DateTime         @updatedAt @map("updated_at")
+  deletedAt                 DateTime?        @map("deleted_at")
+
+  @@map("md_expense_types")
+}
+
 model ExpenseReport {
   id                    String                @id @default(cuid())
   reportNo              String                @unique @map("report_no")
@@ -283,6 +315,7 @@ model ExpenseReport {
   invoices              ExpenseInvoice[]
   approvalInstances     ExpenseApprovalInstance[]
   approvalTasks         ExpenseApprovalTask[]
+  policyChecks          ExpensePolicyCheck[]
 
   @@index([applicantId, status])
   @@index([departmentId])
@@ -303,6 +336,47 @@ model ExpenseApprovalFlowConfig {
   instances     ExpenseApprovalInstance[]
 
   @@map("exp_approval_flow_configs")
+}
+
+model ExpensePolicy {
+  id            String              @id @default(cuid())
+  code          String              @unique
+  name          String
+  description   String?
+  status        ExpensePolicyStatus @default(ACTIVE)
+  effectiveFrom DateTime?           @map("effective_from")
+  effectiveTo   DateTime?           @map("effective_to")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  deletedAt     DateTime?           @map("deleted_at")
+  rules         ExpensePolicyRule[]
+  checks        ExpensePolicyCheck[]
+
+  @@map("exp_policies")
+}
+
+model ExpensePolicyRule {
+  id                  String              @id @default(cuid())
+  policyId            String              @map("policy_id")
+  code                String
+  name                String
+  description         String?
+  expenseTypeCode     String?             @map("expense_type_code")
+  city                String?
+  jobLevel            String?             @map("job_level")
+  maxAmountCents      Int?                @map("max_amount_cents")
+  requiresInvoice     Boolean             @default(false) @map("requires_invoice")
+  requiresPreApproval Boolean             @default(false) @map("requires_pre_approval")
+  action              ExpensePolicyAction @default(WARNING)
+  status              ExpensePolicyStatus @default(ACTIVE)
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  policy              ExpensePolicy       @relation(fields: [policyId], references: [id])
+  checks              ExpensePolicyCheck[]
+
+  @@unique([policyId, code])
+  @@index([expenseTypeCode])
+  @@map("exp_policy_rules")
 }
 
 model ExpenseApprovalInstance {
@@ -388,9 +462,30 @@ model ExpenseReportItem {
   costCenter            CostCenter?   @relation(fields: [costCenterId], references: [id])
   project               Project?      @relation(fields: [projectId], references: [id])
   invoices              ExpenseInvoice[]
+  policyChecks          ExpensePolicyCheck[]
 
   @@index([reportId])
   @@map("exp_report_items")
+}
+
+model ExpensePolicyCheck {
+  id        String                   @id @default(cuid())
+  reportId  String                   @map("report_id")
+  itemId    String?                  @map("item_id")
+  policyId  String?                  @map("policy_id")
+  ruleId    String?                  @map("rule_id")
+  result    ExpensePolicyCheckResult
+  message   String
+  createdAt DateTime                 @default(now()) @map("created_at")
+  report    ExpenseReport            @relation(fields: [reportId], references: [id])
+  item      ExpenseReportItem?       @relation(fields: [itemId], references: [id])
+  policy    ExpensePolicy?           @relation(fields: [policyId], references: [id])
+  rule      ExpensePolicyRule?       @relation(fields: [ruleId], references: [id])
+
+  @@index([reportId, result])
+  @@index([itemId])
+  @@index([ruleId])
+  @@map("exp_policy_checks")
 }
 
 model ExpenseAttachment {

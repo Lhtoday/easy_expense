@@ -259,6 +259,16 @@ body {
   background: #f8fafc;
 }
 
+.policy-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.4fr);
+  gap: 18px;
+}
+
+.policy-rule-section {
+  margin-top: 18px;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;
@@ -310,7 +320,8 @@ body {
   .expense-form-grid,
   .expense-line-grid,
   .expense-sub-form,
-  .invoice-sub-form {
+  .invoice-sub-form,
+  .policy-grid {
     grid-template-columns: 1fr;
   }
 }

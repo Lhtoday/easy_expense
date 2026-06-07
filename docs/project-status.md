@@ -4,7 +4,7 @@
 
 ## Current Phase
 
-- Phase: Phase 4 - Lightweight Approval Workflow
+- Phase: Phase 5 - Expense Policy Control
 - Status: Done
 - Started At: 2026-06-05
 - Completed At: 2026-06-05
@@ -83,10 +83,27 @@
 - [x] Prisma migration 已在本地数据库确认
 - [x] 后端测试、前后端 lint 和 build 通过
 
+## Phase 5 Completion Checklist
+
+- [x] Expense type master data model and management API
+- [x] Expense policy and policy rule models
+- [x] Policy check result trace table
+- [x] Single-item amount limit rules
+- [x] Expense type based invoice requirement rules
+- [x] Pre-approval warning rule placeholder
+- [x] Submit-time policy evaluation with BLOCK and ESCALATE handling
+- [x] Escalated approval flow selection when policy rules require escalation
+- [x] Frontend expense policy management page
+- [x] Frontend policy rule list page section
+- [x] Frontend policy rule enable and disable controls
+- [x] Expense report detail policy check result display
+- [x] Prisma migration applied to local database
+- [x] Backend tests, frontend/backend lint, and frontend/backend build passed
+
 ## Next Phase
 
-- Phase: Phase 5 - Expense Policy Control
-- Trigger: Phase 4 已完成，下一步进入费用政策管控：费用类型、政策规则、金额限制、发票要求和超标处理。
+- Phase: Phase 6 - Budget Control
+- Trigger: Phase 5 is complete. Next step is budget control: budget tables, occupation, release, approval confirmation, actual spend, and over-budget warning/blocking.
 
 ## Latest Progress
 
@@ -104,6 +121,8 @@
 - 2026-06-05: Phase 4 完成。新增 `exp_approval_flow_configs`、`exp_approval_instances`、`exp_approval_tasks`、`exp_approval_logs` 数据模型、迁移和审批权限；提交报销单后自动创建默认主管审批实例和待办任务；审批人可在审批任务页查看待办/已办、打开报销详情并执行通过或驳回；撤回已提交但未处理的单据时同步关闭审批任务；报销单详情展示审批实例、任务和审批日志。`npm.cmd run test`、`npm.cmd run build --workspace backend`、`npm.cmd run build --workspace frontend`、`npm.cmd run lint --workspace backend`、`npm.cmd run lint --workspace frontend` 已通过，`npx.cmd prisma migrate deploy --schema backend/prisma/schema.prisma` 确认本地数据库无待应用迁移。
 - 2026-06-05: Phase 4 用户验收通过。手工测试覆盖关联发票后提交报销单、审批驳回和审批通过，流程未报错，确认 Phase 4 审批闭环完成。
 
+- 2026-06-05: Phase 5 completed. Added expense type master data, expense policies, policy rules, policy check traces, submit-time BLOCK/WARNING/ESCALATE evaluation, escalated approval flow selection, frontend policy management, and policy result display on expense report detail. `npm.cmd run test`, backend/frontend lint, backend/frontend build, Prisma generate, and `prisma migrate deploy` passed.
+
 ## Phase History
 
 | Phase | Status | Started At | Completed At | Notes |
@@ -113,6 +132,7 @@
 | Phase 2 - Expense Report Core | Done | 2026-06-04 | 2026-06-04 | Draft/report models, APIs, withdraw, frontend workspace, detail view, filters, pagination, amount totals, status log, migration, API smoke, browser smoke, tests, lint, and build verified. |
 | Phase 3 - Attachments And Invoice Metadata | Done | 2026-06-04 | 2026-06-05 | Attachment metadata, MinIO upload, authorized preview/download, invoice metadata, duplicate invoice check, item-invoice association UX, tests, lint, build, and MinIO smoke verified. |
 | Phase 4 - Lightweight Approval Workflow | Done | 2026-06-05 | 2026-06-05 | Approval flow config, approval instances, approval tasks, approval logs, submit-created tasks, approve/reject, pending withdrawal closure, frontend approval task list, detail approval records, migration check, tests, lint, and build verified. |
+| Phase 5 - Expense Policy Control | Done | 2026-06-05 | 2026-06-05 | Expense type master data, policy/rule configuration, policy check traces, submit-time blocking and escalation, frontend policy management, detail result display, migration, tests, lint, and build verified. |
 
 ## Update Rules
 

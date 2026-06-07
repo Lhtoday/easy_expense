@@ -14,6 +14,8 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'exp:report:withdraw', name: '撤回报销单', description: '撤回本人已提交且尚未进入审批处理的报销单' },
   { code: 'exp:approval:read', name: '查看审批任务', description: '查看报销审批待办、已办和审批记录' },
   { code: 'exp:approval:approve', name: '处理报销审批', description: '通过或驳回报销审批任务' },
+  { code: 'exp:policy:read', name: '查看费用政策', description: '查看费用类型、政策和规则配置' },
+  { code: 'exp:policy:write', name: '维护费用政策', description: '维护费用类型、政策和规则配置' },
 ];
 
 export interface AuthenticatedUser {

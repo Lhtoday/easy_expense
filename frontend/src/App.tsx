@@ -1,7 +1,8 @@
-import {
+﻿import {
   ApartmentOutlined,
   BankOutlined,
   CheckCircleOutlined,
+  ControlOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
@@ -53,7 +54,16 @@ type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number
 type Status = 'ACTIVE' | 'DISABLED';
 type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'VOIDED';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
-type ResourceKey = 'expense-reports' | 'approvals' | 'users' | 'roles' | 'permissions' | 'departments' | 'cost-centers' | 'projects';
+type ResourceKey =
+  | 'expense-reports'
+  | 'approvals'
+  | 'expense-policies'
+  | 'users'
+  | 'roles'
+  | 'permissions'
+  | 'departments'
+  | 'cost-centers'
+  | 'projects';
 
 interface SessionUser {
   name: string;
@@ -108,6 +118,7 @@ interface ExpenseReportRecord {
   attachments?: ExpenseAttachmentRecord[];
   invoices?: ExpenseInvoiceRecord[];
   approvalInstances?: ExpenseApprovalInstanceRecord[];
+  policyChecks?: ExpensePolicyCheckRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -200,6 +211,51 @@ interface ExpenseInvoiceRecord {
   createdBy: { id: string; name: string };
 }
 
+interface ExpenseTypeRecord extends BaseRecord {
+  defaultAccountSubjectCode?: string | null;
+}
+
+type ExpensePolicyAction = 'WARNING' | 'BLOCK' | 'ESCALATE';
+type ExpensePolicyCheckResult = 'PASS' | 'WARNING' | 'BLOCK' | 'ESCALATE';
+
+interface ExpensePolicyRuleRecord {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  expenseTypeCode?: string | null;
+  city?: string | null;
+  jobLevel?: string | null;
+  maxAmountCents?: number | null;
+  requiresInvoice: boolean;
+  requiresPreApproval: boolean;
+  action: ExpensePolicyAction;
+  status: Status;
+  createdAt: string;
+}
+
+interface ExpensePolicyRecord {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  status: Status;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  createdAt: string;
+  rules: ExpensePolicyRuleRecord[];
+}
+
+interface ExpensePolicyCheckRecord {
+  id: string;
+  itemId?: string | null;
+  result: ExpensePolicyCheckResult;
+  message: string;
+  createdAt: string;
+  policy?: { id: string; code: string; name: string } | null;
+  rule?: { id: string; code: string; name: string; action: ExpensePolicyAction } | null;
+}
+
 interface ExpenseFormValues {
   title: string;
   departmentId?: string;
@@ -252,6 +308,7 @@ const resources: Array<{
 }> = [
   { key: 'expense-reports', label: '报销单', icon: <FileTextOutlined />, readPermission: 'exp:report:read', writePermission: 'exp:report:write' },
   { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
+  { key: 'expense-policies', label: '费用政策', icon: <ControlOutlined />, readPermission: 'exp:policy:read', writePermission: 'exp:policy:write' },
   { key: 'users', label: '用户', icon: <TeamOutlined />, readPermission: 'iam:user:read', writePermission: 'iam:user:write' },
   { key: 'roles', label: '角色', icon: <SafetyOutlined />, readPermission: 'iam:role:read', writePermission: 'iam:role:write' },
   { key: 'permissions', label: '权限', icon: <KeyOutlined />, readPermission: 'iam:role:read', writePermission: 'iam:role:write' },
@@ -292,6 +349,12 @@ const approvalTaskStatusOptions: Array<{ label: string; value: ApprovalTaskStatu
   { label: '已通过', value: 'APPROVED' },
   { label: '已驳回', value: 'REJECTED' },
   { label: '已撤回', value: 'WITHDRAWN' },
+];
+
+const policyActionOptions: Array<{ label: string; value: ExpensePolicyAction }> = [
+  { label: '提醒', value: 'WARNING' },
+  { label: '禁止提交', value: 'BLOCK' },
+  { label: '升级审批', value: 'ESCALATE' },
 ];
 
 function getToken() {
@@ -401,7 +464,7 @@ export function App() {
       });
       return response.data.data;
     },
-    enabled: Boolean(me) && activeResource !== 'expense-reports' && activeResource !== 'approvals',
+    enabled: Boolean(me) && activeResource !== 'expense-reports' && activeResource !== 'approvals' && activeResource !== 'expense-policies',
   });
 
   const expenseListQuery = useQuery<PageResult<ExpenseReportRecord>>({
@@ -427,6 +490,37 @@ export function App() {
     },
     enabled: Boolean(me) && activeResource === 'approvals',
   });
+
+  const expenseTypesQuery = useQuery<PageResult<ExpenseTypeRecord>>({
+    queryKey: ['expense-types'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ExpenseTypeRecord>>>('/expense-types', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me?.permissions.includes('exp:policy:read') || me?.permissions.includes('exp:report:read')),
+  });
+
+  const expensePoliciesQuery = useQuery<PageResult<ExpensePolicyRecord>>({
+    queryKey: ['expense-policies'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ExpensePolicyRecord>>>('/expense-policies', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 20 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'expense-policies',
+  });
+
+  const expenseTypeOptionsForForm = useMemo(() => {
+    const remote = expenseTypesQuery.data?.items
+      .filter((item): item is ExpenseTypeRecord & { code: string } => item.status === 'ACTIVE' && Boolean(item.code))
+      .map((item) => ({ label: item.name, value: item.code }));
+    return remote?.length ? remote : expenseTypeOptions;
+  }, [expenseTypesQuery.data]);
 
   const permissionsQuery = useQuery({
     queryKey: ['permissions'],
@@ -490,7 +584,7 @@ export function App() {
       setExpenseViewing(null);
       messageApi.success('报销单已提交');
     },
-    onError: () => messageApi.error('提交失败，草稿需至少包含一条可报销金额大于 0 的明细'),
+    onError: (error) => messageApi.error(apiErrorMessage(error, '提交失败，请检查明细金额、发票和费用政策规则')),
   });
 
   const withdrawExpenseMutation = useMutation({
@@ -655,7 +749,13 @@ export function App() {
           <div>
             <Text className="page-title">{currentResource.label}管理</Text>
             <Text className="page-subtitle">
-              {activeResource === 'expense-reports' ? '草稿、明细和审批状态' : activeResource === 'approvals' ? '待办、已办和审批记录' : '身份、权限和主数据'}
+              {activeResource === 'expense-reports'
+                ? '草稿、明细和审批状态'
+                : activeResource === 'approvals'
+                  ? '待办、已办和审批记录'
+                  : activeResource === 'expense-policies'
+                    ? '费用类型、政策规则和超标控制'
+                    : '身份、权限和主数据'}
             </Text>
           </div>
           <Select
@@ -733,6 +833,17 @@ export function App() {
               }}
               onViewReport={(task) => void openExpenseDetail(task.report)}
             />
+          ) : activeResource === 'expense-policies' ? (
+            <ExpensePoliciesView
+              canWrite={canWrite}
+              expenseTypes={expenseTypesQuery.data?.items ?? []}
+              loading={expensePoliciesQuery.isLoading || expenseTypesQuery.isLoading}
+              policies={expensePoliciesQuery.data?.items ?? []}
+              onChanged={() => {
+                void queryClient.invalidateQueries({ queryKey: ['expense-policies'] });
+                void queryClient.invalidateQueries({ queryKey: ['expense-types'] });
+              }}
+            />
           ) : (
             <MasterDataView
               activeResource={activeResource}
@@ -774,7 +885,7 @@ export function App() {
         okButtonProps={{ loading: saveExpenseMutation.isPending, icon: <SaveOutlined /> }}
         width={1080}
       >
-        <ExpenseReportForm form={expenseForm} onFinish={(values) => saveExpenseMutation.mutate(values)} />
+        <ExpenseReportForm form={expenseForm} expenseTypeOptions={expenseTypeOptionsForForm} onFinish={(values) => saveExpenseMutation.mutate(values)} />
       </Modal>
       <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
         {expenseViewing ? (
@@ -822,6 +933,257 @@ function MasterDataView({
         scroll={{ x: activeResource === 'roles' ? 1180 : activeResource === 'permissions' ? 760 : 920 }}
         pagination={{ pageSize: 10, total: data?.total }}
       />
+    </>
+  );
+}
+
+function ExpensePoliciesView({
+  canWrite,
+  expenseTypes,
+  loading,
+  policies,
+  onChanged,
+}: {
+  canWrite: boolean;
+  expenseTypes: ExpenseTypeRecord[];
+  loading: boolean;
+  policies: ExpensePolicyRecord[];
+  onChanged: () => void;
+}) {
+  const [expenseTypeOpen, setExpenseTypeOpen] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [rulePolicy, setRulePolicy] = useState<ExpensePolicyRecord | null>(null);
+  const [expenseTypeForm] = Form.useForm();
+  const [policyForm] = Form.useForm();
+  const [ruleForm] = Form.useForm();
+
+  const saveExpenseTypeMutation = useMutation({
+    mutationFn: async (values: Record<string, unknown>) => api.post('/expense-types', values, { headers: authHeaders() }),
+    onSuccess: () => {
+      setExpenseTypeOpen(false);
+      expenseTypeForm.resetFields();
+      onChanged();
+      message.success('费用类型已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '费用类型保存失败')),
+  });
+
+  const disableExpenseTypeMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/expense-types/${id}`, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('费用类型已停用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '费用类型停用失败')),
+  });
+
+  const savePolicyMutation = useMutation({
+    mutationFn: async (values: Record<string, unknown>) => api.post('/expense-policies', values, { headers: authHeaders() }),
+    onSuccess: () => {
+      setPolicyOpen(false);
+      policyForm.resetFields();
+      onChanged();
+      message.success('政策已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '政策保存失败')),
+  });
+
+  const disablePolicyMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/expense-policies/${id}`, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('政策已停用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '政策停用失败')),
+  });
+
+  const saveRuleMutation = useMutation({
+    mutationFn: async (values: Record<string, unknown>) => {
+      if (!rulePolicy) {
+        throw new Error('missing policy');
+      }
+      const payload: Record<string, unknown> = {
+        ...values,
+        maxAmountCents: yuanToCents(values.maxAmountYuan as string | undefined) || undefined,
+      };
+      delete payload.maxAmountYuan;
+      return api.post(`/expense-policies/${rulePolicy.id}/rules`, payload, { headers: authHeaders() });
+    },
+    onSuccess: () => {
+      setRulePolicy(null);
+      ruleForm.resetFields();
+      onChanged();
+      message.success('规则已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '规则保存失败')),
+  });
+
+  const disableRuleMutation = useMutation({
+    mutationFn: async ({ policyId, ruleId }: { policyId: string; ruleId: string }) =>
+      api.delete(`/expense-policies/${policyId}/rules/${ruleId}`, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('规则已停用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '规则停用失败')),
+  });
+
+  const enableRuleMutation = useMutation({
+    mutationFn: async ({ policyId, ruleId }: { policyId: string; ruleId: string }) =>
+      api.patch(`/expense-policies/${policyId}/rules/${ruleId}`, { status: 'ACTIVE' }, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('规则已启用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '规则启用失败')),
+  });
+
+  const expenseTypeOptionsForRules = expenseTypes
+    .filter((item): item is ExpenseTypeRecord & { code: string } => Boolean(item.code))
+    .map((item) => ({ label: `${item.name} (${item.code})`, value: item.code }));
+  const policyRules = policies.flatMap((policy) => policy.rules.map((rule) => ({ ...rule, policyId: policy.id, policyName: policy.name })));
+
+  return (
+    <>
+      <div className="policy-grid">
+        <section>
+          <div className="table-toolbar">
+            <Text strong>费用类型</Text>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={() => setExpenseTypeOpen(true)}>
+              新增费用类型
+            </Button>
+          </div>
+          <Table
+            rowKey="id"
+            loading={loading || disableExpenseTypeMutation.isPending}
+            dataSource={expenseTypes}
+            columns={[
+              { title: '编码', dataIndex: 'code', width: 120 },
+              { title: '名称', dataIndex: 'name', width: 140 },
+              { title: '默认科目', dataIndex: 'defaultAccountSubjectCode', width: 120, render: (value?: string | null) => value ?? '-' },
+              { title: '状态', dataIndex: 'status', width: 90, render: (status: Status) => <Tag color={status === 'ACTIVE' ? 'green' : 'default'}>{status === 'ACTIVE' ? '启用' : '停用'}</Tag> },
+              {
+                title: '操作',
+                width: 90,
+                render: (_: unknown, record: ExpenseTypeRecord) => (
+                  <Button danger size="small" disabled={!canWrite || record.status === 'DISABLED'} onClick={() => disableExpenseTypeMutation.mutate(record.id)}>
+                    停用
+                  </Button>
+                ),
+              },
+            ]}
+            pagination={false}
+            scroll={{ x: 700 }}
+          />
+        </section>
+        <section>
+          <div className="table-toolbar">
+            <Text strong>费用政策</Text>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={() => setPolicyOpen(true)}>
+              新增政策
+            </Button>
+          </div>
+          <Table
+            rowKey="id"
+            loading={loading || disablePolicyMutation.isPending}
+            dataSource={policies}
+            columns={[
+              { title: '编码', dataIndex: 'code', width: 170 },
+              { title: '名称', dataIndex: 'name', width: 180 },
+              { title: '规则数', dataIndex: 'rules', width: 90, render: (rules: ExpensePolicyRuleRecord[]) => rules.length },
+              { title: '状态', dataIndex: 'status', width: 90, render: (status: Status) => <Tag color={status === 'ACTIVE' ? 'green' : 'default'}>{status === 'ACTIVE' ? '启用' : '停用'}</Tag> },
+              {
+                title: '操作',
+                width: 180,
+                render: (_: unknown, record: ExpensePolicyRecord) => (
+                  <Space>
+                    <Button size="small" disabled={!canWrite || record.status === 'DISABLED'} onClick={() => setRulePolicy(record)}>
+                      新增规则
+                    </Button>
+                    <Button danger size="small" disabled={!canWrite || record.status === 'DISABLED'} onClick={() => disablePolicyMutation.mutate(record.id)}>
+                      停用
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+            pagination={false}
+            scroll={{ x: 820 }}
+          />
+        </section>
+      </div>
+      <section className="policy-rule-section">
+        <div className="table-toolbar">
+          <Text strong>政策规则</Text>
+          <Text type="secondary">共 {policyRules.length} 条</Text>
+        </div>
+        <Table
+          rowKey="id"
+          loading={loading || disableRuleMutation.isPending || enableRuleMutation.isPending}
+          dataSource={policyRules}
+          columns={policyRuleColumns(canWrite, disableRuleMutation.mutate, enableRuleMutation.mutate)}
+          pagination={{ pageSize: 10 }}
+          scroll={{ x: 1120 }}
+        />
+      </section>
+
+      <Modal title="新增费用类型" open={expenseTypeOpen} onCancel={() => setExpenseTypeOpen(false)} onOk={() => expenseTypeForm.submit()} okButtonProps={{ loading: saveExpenseTypeMutation.isPending }}>
+        <Form form={expenseTypeForm} layout="vertical" onFinish={(values) => saveExpenseTypeMutation.mutate(values)}>
+          <Form.Item name="code" label="编码" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="defaultAccountSubjectCode" label="默认会计科目">
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal title="新增费用政策" open={policyOpen} onCancel={() => setPolicyOpen(false)} onOk={() => policyForm.submit()} okButtonProps={{ loading: savePolicyMutation.isPending }}>
+        <Form form={policyForm} layout="vertical" onFinish={(values) => savePolicyMutation.mutate(values)}>
+          <Form.Item name="code" label="编码" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal title={`新增规则${rulePolicy ? ` - ${rulePolicy.name}` : ''}`} open={Boolean(rulePolicy)} onCancel={() => setRulePolicy(null)} onOk={() => ruleForm.submit()} okButtonProps={{ loading: saveRuleMutation.isPending }}>
+        <Form form={ruleForm} layout="vertical" onFinish={(values) => saveRuleMutation.mutate(values)} initialValues={{ action: 'WARNING', requiresInvoice: false, requiresPreApproval: false }}>
+          <Form.Item name="code" label="编码" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="expenseTypeCode" label="费用类型">
+            <Select allowClear options={expenseTypeOptionsForRules} />
+          </Form.Item>
+          <Form.Item name="maxAmountYuan" label="单笔限额">
+            <Input suffix="元" inputMode="decimal" />
+          </Form.Item>
+          <Form.Item name="requiresInvoice" label="必须发票">
+            <Select options={[{ label: '否', value: false }, { label: '是', value: true }]} />
+          </Form.Item>
+          <Form.Item name="requiresPreApproval" label="必须事前申请">
+            <Select options={[{ label: '否', value: false }, { label: '是', value: true }]} />
+          </Form.Item>
+          <Form.Item name="action" label="命中处理" rules={[{ required: true }]}>
+            <Select options={policyActionOptions} />
+          </Form.Item>
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 }
@@ -1056,7 +1418,47 @@ function expenseColumns(
   ];
 }
 
-function ExpenseReportForm({ form, onFinish }: { form: FormInstance<ExpenseFormValues>; onFinish: (values: ExpenseFormValues) => void }) {
+function policyRuleColumns(
+  canWrite: boolean,
+  onDisable: (value: { policyId: string; ruleId: string }) => void,
+  onEnable: (value: { policyId: string; ruleId: string }) => void,
+): ColumnsType<ExpensePolicyRuleRecord & { policyId: string; policyName: string }> {
+  return [
+    { title: '所属政策', dataIndex: 'policyName', width: 160 },
+    { title: '编码', dataIndex: 'code', width: 180 },
+    { title: '名称', dataIndex: 'name', width: 180 },
+    { title: '费用类型', dataIndex: 'expenseTypeCode', width: 120, render: (value?: string | null) => expenseTypeName(value ?? undefined) },
+    { title: '单笔限额', dataIndex: 'maxAmountCents', width: 120, align: 'right', render: (value?: number | null) => (value ? formatMoney(value) : '-') },
+    { title: '发票', dataIndex: 'requiresInvoice', width: 90, render: (value: boolean) => (value ? <Tag color="warning">必须</Tag> : '-') },
+    { title: '事前申请', dataIndex: 'requiresPreApproval', width: 110, render: (value: boolean) => (value ? <Tag color="warning">必须</Tag> : '-') },
+    { title: '处理', dataIndex: 'action', width: 110, render: policyActionName },
+    { title: '状态', dataIndex: 'status', width: 90, render: (status: Status) => <Tag color={status === 'ACTIVE' ? 'green' : 'default'}>{status === 'ACTIVE' ? '启用' : '停用'}</Tag> },
+    {
+      title: '操作',
+      width: 90,
+      render: (_: unknown, record) =>
+        record.status === 'ACTIVE' ? (
+          <Button danger size="small" disabled={!canWrite} onClick={() => onDisable({ policyId: record.policyId, ruleId: record.id })}>
+            停用
+          </Button>
+        ) : (
+          <Button size="small" disabled={!canWrite} onClick={() => onEnable({ policyId: record.policyId, ruleId: record.id })}>
+            启用
+          </Button>
+        ),
+    },
+  ];
+}
+
+function ExpenseReportForm({
+  expenseTypeOptions,
+  form,
+  onFinish,
+}: {
+  expenseTypeOptions: Array<{ label: string; value: string }>;
+  form: FormInstance<ExpenseFormValues>;
+  onFinish: (values: ExpenseFormValues) => void;
+}) {
   const items = Form.useWatch('items', form) ?? [];
   const totals = items.reduce(
     (result, item) => ({
@@ -1257,6 +1659,8 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
       </Descriptions>
 
       <InvoiceCheckPanel summary={invoiceSummary} />
+
+      <PolicyCheckPanel checks={record.policyChecks ?? []} />
 
       <Divider orientation="left">报销明细</Divider>
       <Table
@@ -1463,6 +1867,47 @@ function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
       }
     />
   );
+}
+
+function PolicyCheckPanel({ checks }: { checks: ExpensePolicyCheckRecord[] }) {
+  if (!checks.length) {
+    return <Alert className="invoice-check-panel" type="info" showIcon message="费用政策待检查" description="提交报销单时将自动执行费用政策检查。" />;
+  }
+
+  const severity = checks.some((check) => check.result === 'BLOCK')
+    ? 'error'
+    : checks.some((check) => check.result === 'ESCALATE' || check.result === 'WARNING')
+      ? 'warning'
+      : 'success';
+
+  return (
+    <Alert
+      className="invoice-check-panel"
+      type={severity}
+      showIcon
+      message="费用政策检查"
+      description={
+        <Table
+          rowKey="id"
+          size="small"
+          dataSource={checks}
+          columns={policyCheckColumns()}
+          pagination={false}
+          scroll={{ x: 840 }}
+        />
+      }
+    />
+  );
+}
+
+function policyCheckColumns(): ColumnsType<ExpensePolicyCheckRecord> {
+  return [
+    { title: '结果', dataIndex: 'result', width: 110, render: (result: ExpensePolicyCheckResult) => <PolicyCheckTag result={result} /> },
+    { title: '政策', dataIndex: 'policy', width: 160, render: (policy?: ExpensePolicyCheckRecord['policy']) => policy?.name ?? '-' },
+    { title: '规则', dataIndex: 'rule', width: 180, render: (rule?: ExpensePolicyCheckRecord['rule']) => rule?.name ?? '-' },
+    { title: '说明', dataIndex: 'message', width: 380 },
+    { title: '检查时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+  ];
 }
 
 function expenseItemColumns(summary: InvoiceSummary): ColumnsType<ExpenseReportItemRecord> {
@@ -1674,6 +2119,25 @@ function ApprovalTaskStatusTag({ status }: { status: ApprovalTaskStatus }) {
     WITHDRAWN: { color: 'default', label: '已撤回' },
   }[status];
   return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function PolicyCheckTag({ result }: { result: ExpensePolicyCheckResult }) {
+  const config = {
+    PASS: { color: 'success', label: '通过' },
+    WARNING: { color: 'warning', label: '提醒' },
+    BLOCK: { color: 'error', label: '禁止' },
+    ESCALATE: { color: 'processing', label: '升级' },
+  }[result];
+  return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function policyActionName(action: ExpensePolicyAction) {
+  const names = {
+    WARNING: '提醒',
+    BLOCK: '禁止提交',
+    ESCALATE: '升级审批',
+  };
+  return names[action];
 }
 
 function approvalInstanceStatusName(status: ExpenseApprovalInstanceRecord['status']) {

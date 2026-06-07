@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { ExpenseReportsModule } from './expense-reports/expense-reports.module';
+import { ExpensePoliciesModule } from './expense-policies/expense-policies.module';
 import { IdentityModule } from './identity/identity.module';
 import { MasterDataModule } from './master-data/master-data.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,6 +18,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     IdentityModule,
     MasterDataModule,
+    ExpensePoliciesModule,
     ExpenseReportsModule,
     ApprovalsModule,
   ],
