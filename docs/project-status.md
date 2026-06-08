@@ -4,10 +4,10 @@
 
 ## Current Phase
 
-- Phase: Phase 5 - Expense Policy Control
+- Phase: Phase 6 - Budget Control
 - Status: Done
-- Started At: 2026-06-05
-- Completed At: 2026-06-05
+- Started At: 2026-06-08
+- Completed At: 2026-06-08
 
 ## Phase 0 Completion Checklist
 
@@ -100,10 +100,26 @@
 - [x] Prisma migration applied to local database
 - [x] Backend tests, frontend/backend lint, and frontend/backend build passed
 
+## Phase 6 Completion Checklist
+
+- [x] Budget master data model with department, cost center, project, expense type, and account subject dimensions
+- [x] Budget occupation model separating in-transit, approved, actual, and released amounts
+- [x] Budget check trace table for PASS, WARNING, and BLOCK results
+- [x] Budget operation log for occupation, release, approval confirmation, actual transfer, and adjustment actions
+- [x] Submit-time budget occupation with row-level budget locking
+- [x] Withdraw, reject, and void budget release hooks
+- [x] Approval-pass budget confirmation hook
+- [x] Payment-to-actual transfer service method reserved for Phase 8 payment integration
+- [x] Over-budget warning and block control modes
+- [x] Frontend budget control page
+- [x] Expense report detail budget check and occupation display
+- [x] Prisma migration applied to local database
+- [x] Backend/frontend tests, lint, and build passed
+
 ## Next Phase
 
-- Phase: Phase 6 - Budget Control
-- Trigger: Phase 5 is complete. Next step is budget control: budget tables, occupation, release, approval confirmation, actual spend, and over-budget warning/blocking.
+- Phase: Phase 7 - Finance Review
+- Trigger: Phase 6 is complete. Next step is finance review: separate finance approval from business approval, confirm accounting dimensions, tax fields, invoice exceptions, and finance audit logs.
 
 ## Latest Progress
 
@@ -122,6 +138,7 @@
 - 2026-06-05: Phase 4 用户验收通过。手工测试覆盖关联发票后提交报销单、审批驳回和审批通过，流程未报错，确认 Phase 4 审批闭环完成。
 
 - 2026-06-05: Phase 5 completed. Added expense type master data, expense policies, policy rules, policy check traces, submit-time BLOCK/WARNING/ESCALATE evaluation, escalated approval flow selection, frontend policy management, and policy result display on expense report detail. `npm.cmd run test`, backend/frontend lint, backend/frontend build, Prisma generate, and `prisma migrate deploy` passed.
+- 2026-06-08: Phase 6 completed. Added budget master data, budget occupations, budget checks, budget operation logs, submit-time budget occupation, withdraw/reject/void budget release, approval-pass budget confirmation, reserved payment-to-actual transfer service, budget control frontend page, and expense report detail budget impact display. Prisma generate, local migration deploy/status, backend/frontend tests, backend/frontend lint, and backend/frontend build passed.
 
 ## Phase History
 
@@ -133,6 +150,7 @@
 | Phase 3 - Attachments And Invoice Metadata | Done | 2026-06-04 | 2026-06-05 | Attachment metadata, MinIO upload, authorized preview/download, invoice metadata, duplicate invoice check, item-invoice association UX, tests, lint, build, and MinIO smoke verified. |
 | Phase 4 - Lightweight Approval Workflow | Done | 2026-06-05 | 2026-06-05 | Approval flow config, approval instances, approval tasks, approval logs, submit-created tasks, approve/reject, pending withdrawal closure, frontend approval task list, detail approval records, migration check, tests, lint, and build verified. |
 | Phase 5 - Expense Policy Control | Done | 2026-06-05 | 2026-06-05 | Expense type master data, policy/rule configuration, policy check traces, submit-time blocking and escalation, frontend policy management, detail result display, migration, tests, lint, and build verified. |
+| Phase 6 - Budget Control | Done | 2026-06-08 | 2026-06-08 | Budget master data, occupation/check/log models, submit occupation, release/confirm hooks, frontend budget page, detail budget impact, migration, tests, lint, and build verified. |
 
 ## Update Rules
 

@@ -16,6 +16,8 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'exp:approval:approve', name: '处理报销审批', description: '通过或驳回报销审批任务' },
   { code: 'exp:policy:read', name: '查看费用政策', description: '查看费用类型、政策和规则配置' },
   { code: 'exp:policy:write', name: '维护费用政策', description: '维护费用类型、政策和规则配置' },
+  { code: 'exp:budget:read', name: '查看预算', description: '查看预算额度、占用、确认和实际发生情况' },
+  { code: 'exp:budget:write', name: '维护预算', description: '维护预算额度、控制方式和预算调整入口' },
 ];
 
 export interface AuthenticatedUser {

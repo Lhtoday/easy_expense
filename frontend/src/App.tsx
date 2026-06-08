@@ -58,6 +58,7 @@ type ResourceKey =
   | 'expense-reports'
   | 'approvals'
   | 'expense-policies'
+  | 'budgets'
   | 'users'
   | 'roles'
   | 'permissions'
@@ -119,6 +120,8 @@ interface ExpenseReportRecord {
   invoices?: ExpenseInvoiceRecord[];
   approvalInstances?: ExpenseApprovalInstanceRecord[];
   policyChecks?: ExpensePolicyCheckRecord[];
+  budgetChecks?: ExpenseBudgetCheckRecord[];
+  budgetOccupations?: BudgetOccupationRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -256,6 +259,57 @@ interface ExpensePolicyCheckRecord {
   rule?: { id: string; code: string; name: string; action: ExpensePolicyAction } | null;
 }
 
+type BudgetControlMode = 'WARNING' | 'BLOCK';
+type BudgetCheckResult = 'PASS' | 'WARNING' | 'BLOCK';
+type BudgetOccupationStatus = 'IN_TRANSIT' | 'APPROVED' | 'ACTUAL' | 'RELEASED';
+
+interface BudgetRecord {
+  id: string;
+  code: string;
+  name: string;
+  fiscalPeriod: string;
+  departmentId?: string | null;
+  costCenterId?: string | null;
+  projectId?: string | null;
+  expenseTypeCode?: string | null;
+  accountSubjectCode?: string | null;
+  currency: string;
+  totalCents: number;
+  inTransitCents: number;
+  approvedCents: number;
+  actualCents: number;
+  warningThresholdBps: number;
+  controlMode: BudgetControlMode;
+  status: Status;
+  createdAt: string;
+  department?: { code: string; name: string } | null;
+  costCenter?: { code: string; name: string } | null;
+  project?: { code: string; name: string } | null;
+  createdBy?: { id: string; name: string };
+  updatedBy?: { id: string; name: string } | null;
+}
+
+interface ExpenseBudgetCheckRecord {
+  id: string;
+  itemId?: string | null;
+  result: BudgetCheckResult;
+  message: string;
+  createdAt: string;
+  budget?: { id: string; code: string; name: string } | null;
+}
+
+interface BudgetOccupationRecord {
+  id: string;
+  itemId: string;
+  status: BudgetOccupationStatus;
+  fiscalPeriod: string;
+  occupiedCents: number;
+  approvedCents: number;
+  actualCents: number;
+  releasedCents: number;
+  budget: { id: string; code: string; name: string };
+}
+
 interface ExpenseFormValues {
   title: string;
   departmentId?: string;
@@ -309,6 +363,7 @@ const resources: Array<{
   { key: 'expense-reports', label: '报销单', icon: <FileTextOutlined />, readPermission: 'exp:report:read', writePermission: 'exp:report:write' },
   { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
   { key: 'expense-policies', label: '费用政策', icon: <ControlOutlined />, readPermission: 'exp:policy:read', writePermission: 'exp:policy:write' },
+  { key: 'budgets', label: '预算控制', icon: <BankOutlined />, readPermission: 'exp:budget:read', writePermission: 'exp:budget:write' },
   { key: 'users', label: '用户', icon: <TeamOutlined />, readPermission: 'iam:user:read', writePermission: 'iam:user:write' },
   { key: 'roles', label: '角色', icon: <SafetyOutlined />, readPermission: 'iam:role:read', writePermission: 'iam:role:write' },
   { key: 'permissions', label: '权限', icon: <KeyOutlined />, readPermission: 'iam:role:read', writePermission: 'iam:role:write' },
@@ -355,6 +410,11 @@ const policyActionOptions: Array<{ label: string; value: ExpensePolicyAction }> 
   { label: '提醒', value: 'WARNING' },
   { label: '禁止提交', value: 'BLOCK' },
   { label: '升级审批', value: 'ESCALATE' },
+];
+
+const budgetControlModeOptions: Array<{ label: string; value: BudgetControlMode }> = [
+  { label: '超预算提醒', value: 'WARNING' },
+  { label: '超预算拦截', value: 'BLOCK' },
 ];
 
 function getToken() {
@@ -464,7 +524,12 @@ export function App() {
       });
       return response.data.data;
     },
-    enabled: Boolean(me) && activeResource !== 'expense-reports' && activeResource !== 'approvals' && activeResource !== 'expense-policies',
+    enabled:
+      Boolean(me) &&
+      activeResource !== 'expense-reports' &&
+      activeResource !== 'approvals' &&
+      activeResource !== 'expense-policies' &&
+      activeResource !== 'budgets',
   });
 
   const expenseListQuery = useQuery<PageResult<ExpenseReportRecord>>({
@@ -500,7 +565,7 @@ export function App() {
       });
       return response.data.data;
     },
-    enabled: Boolean(me?.permissions.includes('exp:policy:read') || me?.permissions.includes('exp:report:read')),
+    enabled: Boolean(me?.permissions.includes('exp:policy:read') || me?.permissions.includes('exp:report:read') || me?.permissions.includes('exp:budget:read')),
   });
 
   const expensePoliciesQuery = useQuery<PageResult<ExpensePolicyRecord>>({
@@ -513,6 +578,18 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'expense-policies',
+  });
+
+  const budgetsQuery = useQuery<PageResult<BudgetRecord>>({
+    queryKey: ['budgets'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<BudgetRecord>>>('/budgets', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 50 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'budgets',
   });
 
   const expenseTypeOptionsForForm = useMemo(() => {
@@ -755,7 +832,9 @@ export function App() {
                   ? '待办、已办和审批记录'
                   : activeResource === 'expense-policies'
                     ? '费用类型、政策规则和超标控制'
-                    : '身份、权限和主数据'}
+                    : activeResource === 'budgets'
+                      ? '额度、占用和执行情况'
+                      : '身份、权限和主数据'}
             </Text>
           </div>
           <Select
@@ -842,6 +921,17 @@ export function App() {
               onChanged={() => {
                 void queryClient.invalidateQueries({ queryKey: ['expense-policies'] });
                 void queryClient.invalidateQueries({ queryKey: ['expense-types'] });
+              }}
+            />
+          ) : activeResource === 'budgets' ? (
+            <BudgetsView
+              budgets={budgetsQuery.data?.items ?? []}
+              canWrite={canWrite}
+              expenseTypes={expenseTypesQuery.data?.items ?? []}
+              loading={budgetsQuery.isLoading}
+              onChanged={() => {
+                void queryClient.invalidateQueries({ queryKey: ['budgets'] });
+                void queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
               }}
             />
           ) : (
@@ -1188,6 +1278,108 @@ function ExpensePoliciesView({
   );
 }
 
+function BudgetsView({
+  budgets,
+  canWrite,
+  expenseTypes,
+  loading,
+  onChanged,
+}: {
+  budgets: BudgetRecord[];
+  canWrite: boolean;
+  expenseTypes: ExpenseTypeRecord[];
+  loading: boolean;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [form] = Form.useForm();
+  const expenseTypeOptionsForBudget = expenseTypes
+    .filter((item): item is ExpenseTypeRecord & { code: string } => item.status === 'ACTIVE' && Boolean(item.code))
+    .map((item) => ({ label: `${item.name} (${item.code})`, value: item.code }));
+
+  const saveBudgetMutation = useMutation({
+    mutationFn: async (values: Record<string, unknown>) => api.post('/budgets', budgetPayload(values), { headers: authHeaders() }),
+    onSuccess: () => {
+      setOpen(false);
+      form.resetFields();
+      onChanged();
+      message.success('预算已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '预算保存失败')),
+  });
+
+  const disableBudgetMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/budgets/${id}`, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('预算已停用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '预算停用失败')),
+  });
+
+  return (
+    <>
+      <div className="table-toolbar">
+        <Text strong>预算额度与执行</Text>
+        <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={() => setOpen(true)}>
+          新增预算
+        </Button>
+      </div>
+      <Table
+        rowKey="id"
+        loading={loading || disableBudgetMutation.isPending}
+        dataSource={budgets}
+        columns={budgetColumns(canWrite, disableBudgetMutation.mutate)}
+        pagination={{ pageSize: 10, total: budgets.length }}
+        scroll={{ x: 1420 }}
+      />
+      <Modal title="新增预算" open={open} onCancel={() => setOpen(false)} onOk={() => form.submit()} okButtonProps={{ loading: saveBudgetMutation.isPending }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ fiscalPeriod: dayjs(), currency: 'CNY', controlMode: 'WARNING', warningThresholdBps: 9000 }}
+          onFinish={(values) => saveBudgetMutation.mutate(values)}
+        >
+          <Form.Item name="code" label="预算编码" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="name" label="预算名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="fiscalPeriod" label="预算期间" rules={[{ required: true }]}>
+            <DatePicker picker="month" style={{ width: '100%' }} />
+          </Form.Item>
+          <MoneyField name={['totalYuan']} label="预算总额" />
+          <Form.Item name="expenseTypeCode" label="费用类型" rules={[{ required: true }]}>
+            <Select options={expenseTypeOptionsForBudget.length ? expenseTypeOptionsForBudget : expenseTypeOptions} />
+          </Form.Item>
+          <Form.Item name="accountSubjectCode" label="会计科目">
+            <Input />
+          </Form.Item>
+          <Form.Item name="departmentId" label="部门 ID">
+            <Input />
+          </Form.Item>
+          <Form.Item name="costCenterId" label="成本中心 ID">
+            <Input />
+          </Form.Item>
+          <Form.Item name="projectId" label="项目 ID">
+            <Input />
+          </Form.Item>
+          <Form.Item name="currency" label="币种">
+            <Input />
+          </Form.Item>
+          <Form.Item name="controlMode" label="控制方式">
+            <Select options={budgetControlModeOptions} />
+          </Form.Item>
+          <Form.Item name="warningThresholdBps" label="预警阈值(BPS)">
+            <Input type="number" min={0} max={10000} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  );
+}
+
 function ExpenseReportsView({
   canWithdraw,
   canWrite,
@@ -1450,6 +1642,40 @@ function policyRuleColumns(
   ];
 }
 
+function budgetColumns(canWrite: boolean, onDisable: (id: string) => void): ColumnsType<BudgetRecord> {
+  return [
+    { title: '期间', dataIndex: 'fiscalPeriod', width: 100 },
+    { title: '编码', dataIndex: 'code', width: 140 },
+    { title: '名称', dataIndex: 'name', width: 160 },
+    { title: '费用类型', dataIndex: 'expenseTypeCode', width: 120, render: (value?: string | null) => value ?? '-' },
+    { title: '科目', dataIndex: 'accountSubjectCode', width: 120, render: (value?: string | null) => value ?? '-' },
+    { title: '部门', dataIndex: 'department', width: 150, render: (value?: BudgetRecord['department']) => value?.name ?? '-' },
+    { title: '成本中心', dataIndex: 'costCenter', width: 150, render: (value?: BudgetRecord['costCenter']) => value?.name ?? '-' },
+    { title: '项目', dataIndex: 'project', width: 150, render: (value?: BudgetRecord['project']) => value?.name ?? '-' },
+    { title: '总额', dataIndex: 'totalCents', width: 120, align: 'right', render: formatMoney },
+    { title: '在途', dataIndex: 'inTransitCents', width: 120, align: 'right', render: formatMoney },
+    { title: '已确认', dataIndex: 'approvedCents', width: 120, align: 'right', render: formatMoney },
+    { title: '实际', dataIndex: 'actualCents', width: 120, align: 'right', render: formatMoney },
+    {
+      title: '可用',
+      width: 120,
+      align: 'right',
+      render: (_: unknown, record) => formatMoney(record.totalCents - record.inTransitCents - record.approvedCents - record.actualCents),
+    },
+    { title: '控制', dataIndex: 'controlMode', width: 120, render: budgetControlModeName },
+    { title: '状态', dataIndex: 'status', width: 90, render: (status: Status) => <Tag color={status === 'ACTIVE' ? 'green' : 'default'}>{status === 'ACTIVE' ? '启用' : '停用'}</Tag> },
+    {
+      title: '操作',
+      width: 90,
+      render: (_: unknown, record) => (
+        <Button danger size="small" disabled={!canWrite || record.status === 'DISABLED'} onClick={() => onDisable(record.id)}>
+          停用
+        </Button>
+      ),
+    },
+  ];
+}
+
 function ExpenseReportForm({
   expenseTypeOptions,
   form,
@@ -1661,6 +1887,8 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
       <InvoiceCheckPanel summary={invoiceSummary} />
 
       <PolicyCheckPanel checks={record.policyChecks ?? []} />
+
+      <BudgetImpactPanel checks={record.budgetChecks ?? []} occupations={record.budgetOccupations ?? []} />
 
       <Divider orientation="left">报销明细</Divider>
       <Table
@@ -1910,6 +2138,58 @@ function policyCheckColumns(): ColumnsType<ExpensePolicyCheckRecord> {
   ];
 }
 
+function BudgetImpactPanel({ checks, occupations }: { checks: ExpenseBudgetCheckRecord[]; occupations: BudgetOccupationRecord[] }) {
+  if (!checks.length && !occupations.length) {
+    return <Alert className="invoice-check-panel" type="info" showIcon message="预算待检查" description="提交报销单时将自动检查并占用匹配预算。" />;
+  }
+
+  const severity = checks.some((check) => check.result === 'BLOCK')
+    ? 'error'
+    : checks.some((check) => check.result === 'WARNING')
+      ? 'warning'
+      : 'success';
+
+  return (
+    <Alert
+      className="invoice-check-panel"
+      type={severity}
+      showIcon
+      message="预算影响"
+      description={
+        <Space direction="vertical" className="budget-impact-panel">
+          {checks.length ? (
+            <Table rowKey="id" size="small" dataSource={checks} columns={budgetCheckColumns()} pagination={false} scroll={{ x: 760 }} />
+          ) : null}
+          {occupations.length ? (
+            <Table rowKey="id" size="small" dataSource={occupations} columns={budgetOccupationColumns()} pagination={false} scroll={{ x: 820 }} />
+          ) : null}
+        </Space>
+      }
+    />
+  );
+}
+
+function budgetCheckColumns(): ColumnsType<ExpenseBudgetCheckRecord> {
+  return [
+    { title: '结果', dataIndex: 'result', width: 100, render: (result: BudgetCheckResult) => <BudgetCheckTag result={result} /> },
+    { title: '预算', dataIndex: 'budget', width: 180, render: (budget?: ExpenseBudgetCheckRecord['budget']) => budget?.name ?? '-' },
+    { title: '说明', dataIndex: 'message', width: 360 },
+    { title: '检查时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+  ];
+}
+
+function budgetOccupationColumns(): ColumnsType<BudgetOccupationRecord> {
+  return [
+    { title: '期间', dataIndex: 'fiscalPeriod', width: 100 },
+    { title: '预算', dataIndex: 'budget', width: 180, render: (budget: BudgetOccupationRecord['budget']) => budget.name },
+    { title: '状态', dataIndex: 'status', width: 120, render: (status: BudgetOccupationStatus) => <BudgetOccupationStatusTag status={status} /> },
+    { title: '在途占用', dataIndex: 'occupiedCents', width: 120, align: 'right', render: formatMoney },
+    { title: '确认占用', dataIndex: 'approvedCents', width: 120, align: 'right', render: formatMoney },
+    { title: '实际发生', dataIndex: 'actualCents', width: 120, align: 'right', render: formatMoney },
+    { title: '已释放', dataIndex: 'releasedCents', width: 120, align: 'right', render: formatMoney },
+  ];
+}
+
 function expenseItemColumns(summary: InvoiceSummary): ColumnsType<ExpenseReportItemRecord> {
   return [
     { title: '发生日期', dataIndex: 'occurredAt', width: 120, render: (value: string) => dayjs(value).format('YYYY-MM-DD') },
@@ -2131,6 +2411,25 @@ function PolicyCheckTag({ result }: { result: ExpensePolicyCheckResult }) {
   return <Tag color={config.color}>{config.label}</Tag>;
 }
 
+function BudgetCheckTag({ result }: { result: BudgetCheckResult }) {
+  const config = {
+    PASS: { color: 'success', label: '通过' },
+    WARNING: { color: 'warning', label: '提醒' },
+    BLOCK: { color: 'error', label: '拦截' },
+  }[result];
+  return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function BudgetOccupationStatusTag({ status }: { status: BudgetOccupationStatus }) {
+  const config = {
+    IN_TRANSIT: { color: 'processing', label: '在途' },
+    APPROVED: { color: 'success', label: '已确认' },
+    ACTUAL: { color: 'blue', label: '实际发生' },
+    RELEASED: { color: 'default', label: '已释放' },
+  }[status];
+  return <Tag color={config.color}>{config.label}</Tag>;
+}
+
 function policyActionName(action: ExpensePolicyAction) {
   const names = {
     WARNING: '提醒',
@@ -2138,6 +2437,10 @@ function policyActionName(action: ExpensePolicyAction) {
     ESCALATE: '升级审批',
   };
   return names[action];
+}
+
+function budgetControlModeName(mode: BudgetControlMode) {
+  return mode === 'BLOCK' ? '超预算拦截' : '超预算提醒';
 }
 
 function approvalInstanceStatusName(status: ExpenseApprovalInstanceRecord['status']) {
@@ -2421,6 +2724,24 @@ function expenseFormPayload(values: ExpenseFormValues) {
       deductibleTaxCents: yuanToCents(item.deductibleTaxYuan),
       reimbursableCents: yuanToCents(item.reimbursableYuan),
     })),
+  };
+}
+
+function budgetPayload(values: Record<string, unknown>) {
+  const fiscalPeriod = values.fiscalPeriod && dayjs.isDayjs(values.fiscalPeriod) ? values.fiscalPeriod.format('YYYY-MM') : values.fiscalPeriod;
+  return {
+    code: values.code,
+    name: values.name,
+    fiscalPeriod,
+    departmentId: emptyToUndefined(values.departmentId as string | undefined),
+    costCenterId: emptyToUndefined(values.costCenterId as string | undefined),
+    projectId: emptyToUndefined(values.projectId as string | undefined),
+    expenseTypeCode: emptyToUndefined(values.expenseTypeCode as string | undefined),
+    accountSubjectCode: emptyToUndefined(values.accountSubjectCode as string | undefined),
+    currency: emptyToUndefined(values.currency as string | undefined) ?? 'CNY',
+    totalCents: yuanToCents(values.totalYuan as string | undefined),
+    warningThresholdBps: Number(values.warningThresholdBps ?? 9000),
+    controlMode: values.controlMode ?? 'WARNING',
   };
 }
 

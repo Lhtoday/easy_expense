@@ -113,6 +113,37 @@ enum ExpensePolicyCheckResult {
   ESCALATE
 }
 
+enum BudgetStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum BudgetControlMode {
+  WARNING
+  BLOCK
+}
+
+enum BudgetOccupationStatus {
+  IN_TRANSIT
+  APPROVED
+  ACTUAL
+  RELEASED
+}
+
+enum BudgetAction {
+  OCCUPY_IN_TRANSIT
+  RELEASE
+  CONFIRM_APPROVED
+  TRANSFER_ACTUAL
+  ADJUST
+}
+
+enum BudgetCheckResult {
+  PASS
+  WARNING
+  BLOCK
+}
+
 model User {
   id             String             @id @default(cuid())
   employeeNo     String             @unique @map("employee_no")
@@ -135,6 +166,9 @@ model User {
   invoiceCreatedBy ExpenseInvoice[]       @relation("ExpenseInvoiceCreator")
   assignedApprovalTasks ExpenseApprovalTask[] @relation("ApprovalTaskAssignee")
   operatedApprovalLogs  ExpenseApprovalLog[]  @relation("ApprovalLogOperator")
+  createdBudgets        Budget[]              @relation("BudgetCreator")
+  updatedBudgets        Budget[]              @relation("BudgetUpdater")
+  operatedBudgetLogs    BudgetOperationLog[]  @relation("BudgetLogOperator")
 
   @@map("iam_users")
 }
@@ -225,6 +259,7 @@ model Department {
   dataScopes  DataScope[]
   expenseReports ExpenseReport[]
   expenseItems   ExpenseReportItem[]
+  budgets        Budget[]
 
   @@map("md_departments")
 }
@@ -244,6 +279,7 @@ model CostCenter {
   dataScopes   DataScope[]
   expenseReports ExpenseReport[]
   expenseItems   ExpenseReportItem[]
+  budgets        Budget[]
 
   @@map("md_cost_centers")
 }
@@ -266,6 +302,7 @@ model Project {
   dataScopes   DataScope[]
   expenseReports ExpenseReport[]
   expenseItems   ExpenseReportItem[]
+  budgets        Budget[]
 
   @@map("md_projects")
 }
@@ -316,6 +353,8 @@ model ExpenseReport {
   approvalInstances     ExpenseApprovalInstance[]
   approvalTasks         ExpenseApprovalTask[]
   policyChecks          ExpensePolicyCheck[]
+  budgetOccupations     BudgetOccupation[]
+  budgetChecks          ExpenseBudgetCheck[]
 
   @@index([applicantId, status])
   @@index([departmentId])
@@ -463,6 +502,8 @@ model ExpenseReportItem {
   project               Project?      @relation(fields: [projectId], references: [id])
   invoices              ExpenseInvoice[]
   policyChecks          ExpensePolicyCheck[]
+  budgetOccupations     BudgetOccupation[]
+  budgetChecks          ExpenseBudgetCheck[]
 
   @@index([reportId])
   @@map("exp_report_items")
@@ -486,6 +527,120 @@ model ExpensePolicyCheck {
   @@index([itemId])
   @@index([ruleId])
   @@map("exp_policy_checks")
+}
+
+model Budget {
+  id                    String            @id @default(cuid())
+  code                  String            @unique
+  name                  String
+  fiscalPeriod          String            @map("fiscal_period")
+  departmentId          String?           @map("department_id")
+  costCenterId          String?           @map("cost_center_id")
+  projectId             String?           @map("project_id")
+  expenseTypeCode       String?           @map("expense_type_code")
+  accountSubjectCode    String?           @map("account_subject_code")
+  currency              String            @default("CNY")
+  totalCents            Int               @map("total_cents")
+  inTransitCents        Int               @default(0) @map("in_transit_cents")
+  approvedCents         Int               @default(0) @map("approved_cents")
+  actualCents           Int               @default(0) @map("actual_cents")
+  warningThresholdBps   Int               @default(9000) @map("warning_threshold_bps")
+  controlMode           BudgetControlMode @default(WARNING) @map("control_mode")
+  status                BudgetStatus      @default(ACTIVE)
+  createdById           String            @map("created_by")
+  updatedById           String?           @map("updated_by")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  deletedAt             DateTime?         @map("deleted_at")
+  department            Department?       @relation(fields: [departmentId], references: [id])
+  costCenter            CostCenter?       @relation(fields: [costCenterId], references: [id])
+  project               Project?          @relation(fields: [projectId], references: [id])
+  createdBy             User              @relation("BudgetCreator", fields: [createdById], references: [id])
+  updatedBy             User?             @relation("BudgetUpdater", fields: [updatedById], references: [id])
+  occupations           BudgetOccupation[]
+  checks                ExpenseBudgetCheck[]
+  logs                  BudgetOperationLog[]
+
+  @@index([fiscalPeriod, status])
+  @@index([departmentId])
+  @@index([costCenterId])
+  @@index([projectId])
+  @@index([expenseTypeCode])
+  @@unique([fiscalPeriod, departmentId, costCenterId, projectId, expenseTypeCode, accountSubjectCode, currency])
+  @@map("bud_budgets")
+}
+
+model BudgetOccupation {
+  id                    String                 @id @default(cuid())
+  budgetId              String                 @map("budget_id")
+  reportId              String                 @map("report_id")
+  itemId                String                 @map("item_id")
+  status                BudgetOccupationStatus @default(IN_TRANSIT)
+  fiscalPeriod          String                 @map("fiscal_period")
+  departmentId          String?                @map("department_id")
+  costCenterId          String?                @map("cost_center_id")
+  projectId             String?                @map("project_id")
+  expenseTypeCode       String                 @map("expense_type_code")
+  accountSubjectCode    String?                @map("account_subject_code")
+  currency              String                 @default("CNY")
+  occupiedCents         Int                    @map("occupied_cents")
+  approvedCents         Int                    @default(0) @map("approved_cents")
+  actualCents           Int                    @default(0) @map("actual_cents")
+  releasedCents         Int                    @default(0) @map("released_cents")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  releasedAt            DateTime?              @map("released_at")
+  budget                Budget                 @relation(fields: [budgetId], references: [id])
+  report                ExpenseReport          @relation(fields: [reportId], references: [id])
+  item                  ExpenseReportItem      @relation(fields: [itemId], references: [id])
+  logs                  BudgetOperationLog[]
+
+  @@index([budgetId, status])
+  @@index([reportId, status])
+  @@index([itemId])
+  @@map("bud_occupations")
+}
+
+model ExpenseBudgetCheck {
+  id          String            @id @default(cuid())
+  reportId    String            @map("report_id")
+  itemId      String?           @map("item_id")
+  budgetId    String?           @map("budget_id")
+  result      BudgetCheckResult
+  message     String
+  createdAt   DateTime          @default(now()) @map("created_at")
+  report      ExpenseReport     @relation(fields: [reportId], references: [id])
+  item        ExpenseReportItem? @relation(fields: [itemId], references: [id])
+  budget      Budget?           @relation(fields: [budgetId], references: [id])
+
+  @@index([reportId, result])
+  @@index([budgetId])
+  @@map("bud_checks")
+}
+
+model BudgetOperationLog {
+  id            String            @id @default(cuid())
+  budgetId      String            @map("budget_id")
+  occupationId  String?           @map("occupation_id")
+  operatorId    String            @map("operator_id")
+  action        BudgetAction
+  amountCents   Int               @map("amount_cents")
+  beforeInTransitCents Int         @map("before_in_transit_cents")
+  afterInTransitCents  Int         @map("after_in_transit_cents")
+  beforeApprovedCents  Int         @map("before_approved_cents")
+  afterApprovedCents   Int         @map("after_approved_cents")
+  beforeActualCents    Int         @map("before_actual_cents")
+  afterActualCents     Int         @map("after_actual_cents")
+  comment       String?
+  createdAt     DateTime          @default(now()) @map("created_at")
+  budget        Budget            @relation(fields: [budgetId], references: [id])
+  occupation    BudgetOccupation? @relation(fields: [occupationId], references: [id])
+  operator      User              @relation("BudgetLogOperator", fields: [operatorId], references: [id])
+
+  @@index([budgetId])
+  @@index([occupationId])
+  @@index([operatorId])
+  @@map("bud_operation_logs")
 }
 
 model ExpenseAttachment {

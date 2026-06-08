@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   ApprovalAction,
   ApprovalInstanceStatus,
@@ -7,6 +7,7 @@ import {
   ExpenseReportStatus,
   Prisma,
 } from '@prisma/client';
+import { BudgetsService } from '../budgets/budgets.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
@@ -14,7 +15,10 @@ import { ApprovalTaskListQueryDto } from './approval.dto';
 
 @Injectable()
 export class ApprovalsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly budgets?: BudgetsService,
+  ) {}
 
   async listTasks(user: AuthenticatedUser, query: ApprovalTaskListQueryDto): Promise<PageResult<unknown>> {
     this.ensurePermission(user, 'exp:approval:read');
@@ -121,6 +125,13 @@ export class ApprovalsService {
           comment,
         },
       });
+      if (this.budgets) {
+        if (taskStatus === ApprovalTaskStatus.APPROVED) {
+          await this.budgets.confirmApproved(tx, task.reportId, user.id);
+        } else {
+          await this.budgets.releaseReport(tx, task.reportId, user.id, comment ?? '审批驳回释放预算占用');
+        }
+      }
       await tx.expenseReport.update({
         where: { id: task.reportId },
         data: { status: reportStatus, updatedById: user.id },

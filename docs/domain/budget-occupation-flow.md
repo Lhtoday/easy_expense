@@ -23,3 +23,13 @@ ExpenseFlow budgets distinguish in-transit occupation, approved occupation, and 
 - Budget adjustments must create audit logs.
 - Amount fields should preserve reimbursement amount, invoice amount, tax amount, deductible tax, and paid amount separately.
 
+## Phase 6 Implementation Notes
+
+- Budget master data is stored in `bud_budgets`.
+- Budget occupations are stored in `bud_occupations`.
+- Submit-time budget check traces are stored in `bud_checks`.
+- Budget movement audit logs are stored in `bud_operation_logs`.
+- The current approval workflow is still the MVP business-approval workflow, so `APPROVED` confirms budget occupation.
+- `BudgetsService.transferActual` is reserved for Phase 8 payment integration, where approved occupation will move to actual amount.
+- Missing matching budget records create a warning trace and do not block submission.
+- Existing matching budgets can either warn or block when available budget is insufficient, according to `control_mode`.

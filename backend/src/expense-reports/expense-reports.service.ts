@@ -11,6 +11,7 @@ import {
   Prisma,
   UserStatus,
 } from '@prisma/client';
+import { BudgetsService } from '../budgets/budgets.service';
 import { ExpensePoliciesService } from '../expense-policies/expense-policies.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,6 +32,7 @@ export class ExpenseReportsService {
     private readonly prisma: PrismaService,
     @Optional() private readonly storage?: MinioStorageService,
     @Optional() private readonly expensePolicies?: ExpensePoliciesService,
+    @Optional() private readonly budgets?: BudgetsService,
   ) {}
 
   async list(user: AuthenticatedUser, query: ExpenseReportListQueryDto): Promise<PageResult<unknown>> {
@@ -156,6 +158,9 @@ export class ExpenseReportsService {
       if (this.expensePolicies?.hasBlockingFinding(policyFindings)) {
         throw new BadRequestException(this.expensePolicies.blockingMessage(policyFindings));
       }
+      if (this.budgets) {
+        await this.budgets.occupyOnSubmit(tx, id, user.id);
+      }
 
       const report = await tx.expenseReport.update({
         where: { id },
@@ -185,6 +190,9 @@ export class ExpenseReportsService {
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await this.ensureEditable(tx, id);
+      if (this.budgets) {
+        await this.budgets.releaseReport(tx, id, user.id, '作废报销单释放预算占用');
+      }
       return tx.expenseReport.update({
         where: { id },
         data: {
@@ -212,6 +220,9 @@ export class ExpenseReportsService {
     return this.prisma.$transaction(async (tx) => {
       const existing = await this.ensureWithdrawable(tx, id, user);
       await this.withdrawPendingApproval(tx, id, user.id, comment ?? '申请人撤回报销单');
+      if (this.budgets) {
+        await this.budgets.releaseReport(tx, id, user.id, comment ?? '撤回报销单释放预算占用');
+      }
       return tx.expenseReport.update({
         where: { id },
         data: {
@@ -721,6 +732,31 @@ export class ExpenseReportsService {
           createdAt: true,
           policy: { select: { id: true, code: true, name: true } },
           rule: { select: { id: true, code: true, name: true, action: true } },
+        },
+      },
+      budgetChecks: {
+        orderBy: [{ result: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          itemId: true,
+          result: true,
+          message: true,
+          createdAt: true,
+          budget: { select: { id: true, code: true, name: true } },
+        },
+      },
+      budgetOccupations: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          itemId: true,
+          status: true,
+          fiscalPeriod: true,
+          occupiedCents: true,
+          approvedCents: true,
+          actualCents: true,
+          releasedCents: true,
+          budget: { select: { id: true, code: true, name: true } },
         },
       },
     } satisfies Prisma.ExpenseReportSelect;
