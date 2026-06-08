@@ -111,6 +111,7 @@ describe('ExpenseReportsService', () => {
       },
       user: { findFirst: vi.fn().mockResolvedValue({ id: 'approver_1' }) },
       expenseApprovalInstance: {
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({ id: 'instance_1', tasks: [{ id: 'task_1' }] }),
       },
       expenseApprovalLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) },
@@ -152,6 +153,7 @@ describe('ExpenseReportsService', () => {
       },
       user: { findFirst: vi.fn().mockResolvedValue({ id: 'approver_1' }) },
       expenseApprovalInstance: {
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({ id: 'instance_2', tasks: [{ id: 'task_2' }] }),
       },
       expenseApprovalLog: { create: vi.fn().mockResolvedValue({ id: 'log_2' }) },
@@ -173,6 +175,35 @@ describe('ExpenseReportsService', () => {
       }),
     );
     expect(tx.expenseApprovalInstance.create).toHaveBeenCalled();
+  });
+
+  it('blocks resubmitting a report that already has an approved approval instance', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.REJECTED,
+          currency: 'CNY',
+          departmentId: null,
+          costCenterId: null,
+          reimbursableCents: 12050,
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.SUBMITTED }),
+      },
+      expenseReportItem: { count: vi.fn().mockResolvedValue(1) },
+      expenseApprovalInstance: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'instance_approved' }),
+      },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(service.submit(user, 'report_1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.expenseApprovalInstance.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { reportId: 'report_1', status: 'APPROVED' },
+      }),
+    );
   });
 
   it('withdraws own submitted report back to draft with audit log', async () => {

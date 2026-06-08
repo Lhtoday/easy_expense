@@ -501,6 +501,14 @@ export class ExpenseReportsService {
   }
 
   private async createApprovalInstance(tx: Prisma.TransactionClient, reportId: string, user: AuthenticatedUser, escalated: boolean) {
+    const approvedInstance = await tx.expenseApprovalInstance.findFirst({
+      where: { reportId, status: ApprovalInstanceStatus.APPROVED },
+      select: { id: true },
+    });
+    if (approvedInstance) {
+      throw new BadRequestException('该报销单已存在通过的审批记录，不能重新提交生成新的审批任务');
+    }
+
     const flowCode = escalated ? 'ESCALATED_EXPENSE_APPROVAL' : 'DEFAULT_EXPENSE_APPROVAL';
     const flow = await tx.expenseApprovalFlowConfig.findFirst({
       where: { code: flowCode, status: ApprovalFlowConfigStatus.ACTIVE },

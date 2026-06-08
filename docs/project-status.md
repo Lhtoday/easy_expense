@@ -90,6 +90,8 @@
 - [x] Policy check result trace table
 - [x] Single-item amount limit rules
 - [x] Expense type based invoice requirement rules
+- [x] Single-item limit checks use expense amount instead of reimbursable amount
+- [x] Required-invoice rules block submission when linked invoice tax-inclusive totals are less than the expense amount
 - [x] Pre-approval warning rule placeholder
 - [x] Submit-time policy evaluation with BLOCK and ESCALATE handling
 - [x] Escalated approval flow selection when policy rules require escalation
@@ -139,6 +141,7 @@
 
 - 2026-06-05: Phase 5 completed. Added expense type master data, expense policies, policy rules, policy check traces, submit-time BLOCK/WARNING/ESCALATE evaluation, escalated approval flow selection, frontend policy management, and policy result display on expense report detail. `npm.cmd run test`, backend/frontend lint, backend/frontend build, Prisma generate, and `prisma migrate deploy` passed.
 - 2026-06-08: Phase 6 completed. Added budget master data, budget occupations, budget checks, budget operation logs, submit-time budget occupation, withdraw/reject/void budget release, approval-pass budget confirmation, reserved payment-to-actual transfer service, budget control frontend page, and expense report detail budget impact display. Prisma generate, local migration deploy/status, backend/frontend tests, backend/frontend lint, and backend/frontend build passed.
+- 2026-06-08: Tightened Phase 5 policy enforcement after manual validation. Single-item limits now compare against expense amount instead of reimbursable amount, and required-invoice rules now block submission when linked invoice tax-inclusive totals are less than the expense amount. Added focused backend tests; `npm.cmd run test --workspace backend` and `npm.cmd run build --workspace backend` passed.
 
 ## Phase History
 
@@ -149,7 +152,7 @@
 | Phase 2 - Expense Report Core | Done | 2026-06-04 | 2026-06-04 | Draft/report models, APIs, withdraw, frontend workspace, detail view, filters, pagination, amount totals, status log, migration, API smoke, browser smoke, tests, lint, and build verified. |
 | Phase 3 - Attachments And Invoice Metadata | Done | 2026-06-04 | 2026-06-05 | Attachment metadata, MinIO upload, authorized preview/download, invoice metadata, duplicate invoice check, item-invoice association UX, tests, lint, build, and MinIO smoke verified. |
 | Phase 4 - Lightweight Approval Workflow | Done | 2026-06-05 | 2026-06-05 | Approval flow config, approval instances, approval tasks, approval logs, submit-created tasks, approve/reject, pending withdrawal closure, frontend approval task list, detail approval records, migration check, tests, lint, and build verified. |
-| Phase 5 - Expense Policy Control | Done | 2026-06-05 | 2026-06-05 | Expense type master data, policy/rule configuration, policy check traces, submit-time blocking and escalation, frontend policy management, detail result display, migration, tests, lint, and build verified. |
+| Phase 5 - Expense Policy Control | Done | 2026-06-05 | 2026-06-05 | Expense type master data, policy/rule configuration, policy check traces, submit-time blocking and escalation, expense-amount limit checks, required-invoice amount coverage checks, frontend policy management, detail result display, migration, tests, lint, and build verified. |
 | Phase 6 - Budget Control | Done | 2026-06-08 | 2026-06-08 | Budget master data, occupation/check/log models, submit occupation, release/confirm hooks, frontend budget page, detail budget impact, migration, tests, lint, and build verified. |
 
 ## Update Rules

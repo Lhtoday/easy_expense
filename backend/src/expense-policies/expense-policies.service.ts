@@ -233,8 +233,9 @@ export class ExpensePoliciesService {
             id: true,
             expenseTypeCode: true,
             description: true,
+            amountCents: true,
             reimbursableCents: true,
-            invoices: { where: { deletedAt: null }, select: { id: true } },
+            invoices: { where: { deletedAt: null }, select: { id: true, totalAmountCents: true } },
           },
         },
       },
@@ -273,7 +274,7 @@ export class ExpensePoliciesService {
       for (const rule of policy.rules) {
         const matchedItems = report.items.filter((item) => !rule.expenseTypeCode || item.expenseTypeCode === rule.expenseTypeCode);
         for (const item of matchedItems) {
-          if (rule.maxAmountCents !== null && item.reimbursableCents > rule.maxAmountCents) {
+          if (rule.maxAmountCents !== null && item.amountCents > rule.maxAmountCents) {
             findings.push(
               this.toFinding(
                 report.id,
@@ -281,12 +282,26 @@ export class ExpensePoliciesService {
                 policy.id,
                 rule.id,
                 rule.action,
-                `${item.description} 命中「${rule.name}」：可报销金额 ${item.reimbursableCents / 100} 元超过单笔限额 ${rule.maxAmountCents / 100} 元`,
+                `${item.description} 命中「${rule.name}」：费用金额 ${item.amountCents / 100} 元超过单笔限额 ${rule.maxAmountCents / 100} 元`,
               ),
             );
           }
-          if (rule.requiresInvoice && item.invoices.length < 1) {
-            findings.push(this.toFinding(report.id, item.id, policy.id, rule.id, rule.action, `${item.description} 命中「${rule.name}」：该费用类型必须关联发票`));
+          if (rule.requiresInvoice) {
+            const invoiceTotalCents = item.invoices.reduce((total, invoice) => total + invoice.totalAmountCents, 0);
+            if (item.invoices.length < 1) {
+              findings.push(this.toFinding(report.id, item.id, policy.id, rule.id, rule.action, `${item.description} 命中「${rule.name}」：该费用类型必须关联发票`));
+            } else if (invoiceTotalCents < item.amountCents) {
+              findings.push(
+                this.toFinding(
+                  report.id,
+                  item.id,
+                  policy.id,
+                  rule.id,
+                  rule.action,
+                  `${item.description} 命中「${rule.name}」：发票价税合计 ${invoiceTotalCents / 100} 元小于费用金额 ${item.amountCents / 100} 元`,
+                ),
+              );
+            }
           }
           if (rule.requiresPreApproval) {
             findings.push(this.toFinding(report.id, item.id, policy.id, rule.id, rule.action, `${item.description} 命中「${rule.name}」：该费用类型需要补充事前申请依据`));
