@@ -72,6 +72,8 @@ http://localhost:5173
 
 如果需要让服务在当前终端外继续运行，可用隐藏 PowerShell 进程启动。该方式适合本地桌面环境和自动化助手；普通人工开发仍建议使用前台窗口，便于查看编译日志。
 
+Codex Desktop 自动化启动时，后端和前端不要并行请求长期进程权限。推荐顺序是：先启动后端，等待并验证 `http://localhost:3000/api/health`；后端健康后再启动前端，并验证 `http://localhost:5173`。Docker 依赖已 healthy 时保持运行，不要为了重启前后端而重启 Docker 容器。
+
 启动后端：
 
 ```powershell

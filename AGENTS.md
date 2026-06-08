@@ -67,6 +67,7 @@
 - 当用户要求启动本项目、启动服务或检查本地运行状态时，必须先阅读并遵守 `docs/startup-guide.md`。
 - 启动顺序、环境变量、健康检查地址和默认登录信息以 `docs/startup-guide.md` 为准。
 - 不要在未查看启动文档的情况下自行推断前后端启动命令。
+- Codex Desktop 中启动或重启前后端时，不要并行请求后端和前端长期进程权限；应先启动后端并验证 `http://localhost:3000/api/health`，再启动前端并验证 `http://localhost:5173`。Docker 依赖已健康时不要重启它们。
 
 ## Git Operations
 
