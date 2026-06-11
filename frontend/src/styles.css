@@ -176,6 +176,15 @@ body {
   gap: 2px;
 }
 
+.reference-picker {
+  width: 100%;
+}
+
+.reference-picker .ant-select {
+  min-width: 0;
+  flex: 1;
+}
+
 .expense-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -226,6 +235,12 @@ body {
 
 .invoice-check-panel {
   margin-top: 12px;
+}
+
+.section-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
 .expense-sub-form {

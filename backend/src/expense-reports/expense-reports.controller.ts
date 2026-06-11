@@ -108,6 +108,11 @@ export class ExpenseReportsController {
     return this.service.registerInvoice(request.user, id, dto);
   }
 
+  @Patch(':id/invoices/:invoiceId')
+  updateInvoice(@Req() request: RequestWithUser, @Param('id') id: string, @Param('invoiceId') invoiceId: string, @Body() dto: RegisterExpenseInvoiceDto) {
+    return this.service.updateInvoice(request.user, id, invoiceId, dto);
+  }
+
   @Delete(':id/invoices/:invoiceId')
   removeInvoice(@Req() request: RequestWithUser, @Param('id') id: string, @Param('invoiceId') invoiceId: string) {
     return this.service.removeInvoice(request.user, id, invoiceId);

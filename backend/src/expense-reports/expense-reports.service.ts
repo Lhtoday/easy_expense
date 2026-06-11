@@ -418,6 +418,64 @@ export class ExpenseReportsService {
     });
   }
 
+  async updateInvoice(user: AuthenticatedUser, reportId: string, invoiceId: string, dto: RegisterExpenseInvoiceDto) {
+    this.ensurePermission(user, 'exp:invoice:write');
+    this.validateInvoice(dto);
+
+    return this.prisma.$transaction(async (tx) => {
+      const report = await this.ensureEditable(tx, reportId);
+      const existing = await tx.expenseInvoice.findFirst({ where: { id: invoiceId, reportId, deletedAt: null }, select: { id: true } });
+      if (!existing) {
+        throw new NotFoundException('发票不存在');
+      }
+      if (dto.itemId) {
+        const item = await tx.expenseReportItem.findFirst({ where: { id: dto.itemId, reportId }, select: { id: true } });
+        if (!item) {
+          throw new BadRequestException('发票关联的报销明细不存在');
+        }
+      }
+
+      const duplicate = await tx.expenseInvoice.findFirst({
+        where: {
+          id: { not: invoiceId },
+          deletedAt: null,
+          invoiceCode: dto.invoiceCode ?? null,
+          invoiceNo: dto.invoiceNo,
+          issuedAt: new Date(dto.issuedAt),
+          totalAmountCents: dto.totalAmountCents,
+          sellerName: dto.sellerName,
+        },
+        select: { id: true },
+      });
+
+      const invoice = await tx.expenseInvoice.update({
+        where: { id: invoiceId },
+        data: {
+          itemId: dto.itemId,
+          invoiceCode: dto.invoiceCode,
+          invoiceNo: dto.invoiceNo,
+          issuedAt: new Date(dto.issuedAt),
+          sellerName: dto.sellerName,
+          sellerTaxNo: dto.sellerTaxNo,
+          buyerName: dto.buyerName,
+          buyerTaxNo: dto.buyerTaxNo,
+          amountCents: dto.amountCents,
+          taxAmountCents: dto.taxAmountCents,
+          deductibleTaxCents: dto.deductibleTaxCents,
+          totalAmountCents: dto.totalAmountCents,
+          currency: dto.currency ?? report.currency,
+          duplicateStatus: duplicate ? InvoiceDuplicateStatus.DUPLICATE : InvoiceDuplicateStatus.UNIQUE,
+          duplicateOfId: duplicate?.id,
+        },
+        select: this.invoiceSelect(),
+      });
+      if (this.expensePolicies) {
+        await this.expensePolicies.evaluateAndStore(tx, reportId);
+      }
+      return invoice;
+    });
+  }
+
   private ensurePermission(user: AuthenticatedUser, permission: string) {
     if (!user.permissions.includes(permission)) {
       throw new ForbiddenException('缺少报销单操作权限');

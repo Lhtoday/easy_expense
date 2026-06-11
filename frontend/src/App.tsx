@@ -85,6 +85,8 @@ interface BaseRecord {
   costCenterId?: string | null;
   permissions?: Array<{ permission: PermissionRecord }>;
   permissionCodes?: string[];
+  roles?: Array<{ role: { id: string; code: string; name: string } }>;
+  roleIds?: string[];
 }
 
 interface PermissionRecord {
@@ -351,6 +353,13 @@ interface InvoiceFormValues {
   currency?: string;
 }
 
+interface ReferenceData {
+  departments: BaseRecord[];
+  costCenters: BaseRecord[];
+  projects: BaseRecord[];
+  roles: BaseRecord[];
+}
+
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api' });
 
 const resources: Array<{
@@ -532,6 +541,54 @@ export function App() {
       activeResource !== 'budgets',
   });
 
+  const departmentsReferenceQuery = useQuery<PageResult<BaseRecord>>({
+    queryKey: ['reference', 'departments'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<BaseRecord>>>('/departments', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me?.permissions.includes('md:department:read')),
+  });
+
+  const costCentersReferenceQuery = useQuery<PageResult<BaseRecord>>({
+    queryKey: ['reference', 'cost-centers'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<BaseRecord>>>('/cost-centers', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me?.permissions.includes('md:cost-center:read')),
+  });
+
+  const projectsReferenceQuery = useQuery<PageResult<BaseRecord>>({
+    queryKey: ['reference', 'projects'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<BaseRecord>>>('/projects', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me?.permissions.includes('md:project:read')),
+  });
+
+  const rolesReferenceQuery = useQuery<PageResult<BaseRecord>>({
+    queryKey: ['reference', 'roles'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<BaseRecord>>>('/roles', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me?.permissions.includes('iam:role:read')),
+  });
+
   const expenseListQuery = useQuery<PageResult<ExpenseReportRecord>>({
     queryKey: ['expense-reports', expensePage, expensePageSize, expenseKeyword, expenseStatus],
     queryFn: async () => {
@@ -599,6 +656,16 @@ export function App() {
     return remote?.length ? remote : expenseTypeOptions;
   }, [expenseTypesQuery.data]);
 
+  const referenceData = useMemo<ReferenceData>(
+    () => ({
+      departments: departmentsReferenceQuery.data?.items ?? [],
+      costCenters: costCentersReferenceQuery.data?.items ?? [],
+      projects: projectsReferenceQuery.data?.items ?? [],
+      roles: rolesReferenceQuery.data?.items ?? [],
+    }),
+    [costCentersReferenceQuery.data, departmentsReferenceQuery.data, projectsReferenceQuery.data, rolesReferenceQuery.data],
+  );
+
   const permissionsQuery = useQuery({
     queryKey: ['permissions'],
     queryFn: async () => {
@@ -621,15 +688,17 @@ export function App() {
       setEditing(null);
       form.resetFields();
       await queryClient.invalidateQueries({ queryKey: [activeResource] });
+      await queryClient.invalidateQueries({ queryKey: ['reference', activeResource] });
       messageApi.success('已保存');
     },
-    onError: () => messageApi.error('保存失败，请检查字段或权限'),
+    onError: (error) => messageApi.error(apiErrorMessage(error, '保存失败，请检查字段或权限')),
   });
 
   const removeMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/${activeResource}/${id}`, { headers: authHeaders() }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: [activeResource] });
+      await queryClient.invalidateQueries({ queryKey: ['reference', activeResource] });
       messageApi.success('已停用');
     },
     onError: () => messageApi.error('停用失败'),
@@ -964,7 +1033,7 @@ export function App() {
         okButtonProps={{ loading: saveMutation.isPending }}
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)}>
-          {fields(activeResource, Boolean(editing), permissionsQuery.data ?? [])}
+          {fields(activeResource, Boolean(editing), permissionsQuery.data ?? [], referenceData)}
         </Form>
       </Modal>
       <Modal
@@ -975,7 +1044,7 @@ export function App() {
         okButtonProps={{ loading: saveExpenseMutation.isPending, icon: <SaveOutlined /> }}
         width={1080}
       >
-        <ExpenseReportForm form={expenseForm} expenseTypeOptions={expenseTypeOptionsForForm} onFinish={(values) => saveExpenseMutation.mutate(values)} />
+        <ExpenseReportForm form={expenseForm} expenseTypeOptions={expenseTypeOptionsForForm} referenceData={referenceData} onFinish={(values) => saveExpenseMutation.mutate(values)} />
       </Modal>
       <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
         {expenseViewing ? (
@@ -1679,10 +1748,12 @@ function budgetColumns(canWrite: boolean, onDisable: (id: string) => void): Colu
 function ExpenseReportForm({
   expenseTypeOptions,
   form,
+  referenceData,
   onFinish,
 }: {
   expenseTypeOptions: Array<{ label: string; value: string }>;
   form: FormInstance<ExpenseFormValues>;
+  referenceData: ReferenceData;
   onFinish: (values: ExpenseFormValues) => void;
 }) {
   const items = Form.useWatch('items', form) ?? [];
@@ -1705,14 +1776,14 @@ function ExpenseReportForm({
         <Form.Item name="currency" label="币种" initialValue="CNY">
           <Select options={[{ label: '人民币 CNY', value: 'CNY' }]} />
         </Form.Item>
-        <Form.Item name="departmentId" label="部门 ID">
-          <Input />
+        <Form.Item name="departmentId" label="部门">
+          <ReferenceSelect records={referenceData.departments} placeholder="选择部门" />
         </Form.Item>
-        <Form.Item name="costCenterId" label="成本中心 ID">
-          <Input />
+        <Form.Item name="costCenterId" label="成本中心">
+          <ReferenceSelect records={referenceData.costCenters} placeholder="选择成本中心" />
         </Form.Item>
-        <Form.Item name="projectId" label="项目 ID">
-          <Input />
+        <Form.Item name="projectId" label="项目">
+          <ReferenceSelect records={referenceData.projects} placeholder="选择项目" />
         </Form.Item>
       </div>
       <div className="expense-total-bar">
@@ -1749,6 +1820,15 @@ function ExpenseReportForm({
                   <Form.Item name={[field.name, 'description']} label="说明" rules={[{ required: true }]}>
                     <Input />
                   </Form.Item>
+                  <Form.Item name={[field.name, 'departmentId']} label="部门">
+                    <ReferenceSelect records={referenceData.departments} placeholder="默认使用单据部门" />
+                  </Form.Item>
+                  <Form.Item name={[field.name, 'costCenterId']} label="成本中心">
+                    <ReferenceSelect records={referenceData.costCenters} placeholder="默认使用单据成本中心" />
+                  </Form.Item>
+                  <Form.Item name={[field.name, 'projectId']} label="项目">
+                    <ReferenceSelect records={referenceData.projects} placeholder="选择项目" />
+                  </Form.Item>
                   <MoneyField name={[field.name, 'amountYuan']} label="费用金额" />
                   <MoneyField name={[field.name, 'taxAmountYuan']} label="税额" />
                   <MoneyField name={[field.name, 'deductibleTaxYuan']} label="可抵扣税额" />
@@ -1767,6 +1847,8 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
   const [attachmentForm] = Form.useForm<AttachmentFormValues>();
   const [invoiceForm] = Form.useForm<InvoiceFormValues>();
   const [attachmentFiles, setAttachmentFiles] = useState<UploadFile[]>([]);
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<ExpenseInvoiceRecord | null>(null);
 
   const uploadAttachmentMutation = useMutation({
     mutationFn: async (values: AttachmentFormValues) => {
@@ -1800,33 +1882,22 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
     onError: () => message.error('附件删除失败'),
   });
 
-  const registerInvoiceMutation = useMutation({
-    mutationFn: async (values: InvoiceFormValues) =>
-      api.post(
-        `/expense-reports/${record.id}/invoices`,
-        {
-          itemId: values.itemId,
-          invoiceCode: values.invoiceCode,
-          invoiceNo: values.invoiceNo,
-          issuedAt: values.issuedAt?.format('YYYY-MM-DD'),
-          sellerName: values.sellerName,
-          sellerTaxNo: values.sellerTaxNo,
-          buyerName: values.buyerName,
-          buyerTaxNo: values.buyerTaxNo,
-          amountCents: yuanToCents(values.amountYuan),
-          taxAmountCents: yuanToCents(values.taxAmountYuan),
-          deductibleTaxCents: yuanToCents(values.deductibleTaxYuan),
-          totalAmountCents: yuanToCents(values.totalAmountYuan),
-          currency: values.currency ?? record.currency,
-        },
-        { headers: authHeaders() },
-      ),
+  const saveInvoiceMutation = useMutation({
+    mutationFn: async (values: InvoiceFormValues) => {
+      const payload = invoicePayload(values, record.currency);
+      if (editingInvoice) {
+        return api.patch(`/expense-reports/${record.id}/invoices/${editingInvoice.id}`, payload, { headers: authHeaders() });
+      }
+      return api.post(`/expense-reports/${record.id}/invoices`, payload, { headers: authHeaders() });
+    },
     onSuccess: async () => {
       invoiceForm.resetFields();
+      setEditingInvoice(null);
+      setInvoiceModalOpen(false);
       await onChanged();
-      message.success('发票已登记');
+      message.success(editingInvoice ? '发票已更新' : '发票已登记');
     },
-    onError: () => message.error('发票登记失败，请检查金额、重复信息或单据状态'),
+    onError: (error) => message.error(apiErrorMessage(error, '发票保存失败，请检查金额、重复信息或单据状态')),
   });
 
   const removeInvoiceMutation = useMutation({
@@ -1840,11 +1911,19 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
 
   const editable = canWrite && isEditableExpenseStatus(record.status);
   const invoiceSummary = buildInvoiceSummary(record.items ?? [], record.invoices ?? []);
-  const invoiceItemOptions = (record.items ?? []).map((item, index) => {
+  const invoiceItemOptions = (record.items ?? [])
+    .filter((item): item is ExpenseReportItemRecord & { id: string } => Boolean(item.id))
+    .map((item, index) => {
     const summary = invoiceSummary.byItemId.get(item.id ?? '');
     const status = summary?.count ? `${summary.count} 张票据 / ${formatMoney(summary.totalAmountCents)}` : '未关联发票';
     return { label: `${index + 1}. ${item.description} · ${formatMoney(item.reimbursableCents)} · ${status}`, value: item.id };
   });
+
+  function openInvoiceModal(invoice?: ExpenseInvoiceRecord) {
+    setEditingInvoice(invoice ?? null);
+    invoiceForm.setFieldsValue(invoice ? invoiceToFormValues(invoice) : { currency: record.currency, taxAmountYuan: '0.00', deductibleTaxYuan: '0.00' });
+    setInvoiceModalOpen(true);
+  }
 
   async function openAttachmentFile(attachment: ExpenseAttachmentRecord, mode: 'download' | 'preview') {
     const response = await api.get<Blob>(`/expense-reports/${record.id}/attachments/${attachment.id}/${mode}`, {
@@ -1950,64 +2029,33 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
 
       <Divider orientation="left">发票</Divider>
       {editable ? (
-        <Form
-          form={invoiceForm}
-          className="expense-sub-form invoice-sub-form"
-          layout="vertical"
-          onFinish={(values) => registerInvoiceMutation.mutate(values)}
-          initialValues={{ currency: record.currency, taxAmountYuan: '0.00', deductibleTaxYuan: '0.00' }}
-        >
-          <Form.Item name="itemId" label="关联明细">
-            <Select
-              allowClear
-              options={invoiceItemOptions}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item name="invoiceCode" label="发票代码">
-            <Input />
-          </Form.Item>
-          <Form.Item name="invoiceNo" label="发票号码" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="issuedAt" label="开票日期" rules={[{ required: true }]}>
-            <DatePicker className="full-width-control" />
-          </Form.Item>
-          <Form.Item name="sellerName" label="销方名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="sellerTaxNo" label="销方税号">
-            <Input />
-          </Form.Item>
-          <Form.Item name="amountYuan" label="金额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
-            <Input suffix="元" inputMode="decimal" />
-          </Form.Item>
-          <Form.Item name="taxAmountYuan" label="税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
-            <Input suffix="元" inputMode="decimal" />
-          </Form.Item>
-          <Form.Item name="deductibleTaxYuan" label="可抵扣税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
-            <Input suffix="元" inputMode="decimal" />
-          </Form.Item>
-          <Form.Item name="totalAmountYuan" label="价税合计" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
-            <Input suffix="元" inputMode="decimal" />
-          </Form.Item>
-          <Form.Item name="currency" label="币种">
-            <Input />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" loading={registerInvoiceMutation.isPending}>
+        <div className="section-toolbar">
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openInvoiceModal()}>
             登记发票
           </Button>
-        </Form>
+        </div>
       ) : null}
       <Table
         rowKey="id"
         dataSource={record.invoices ?? []}
-        columns={expenseInvoiceColumns(record.items ?? [], editable, invoiceSummary, (id) => removeInvoiceMutation.mutate(id))}
+        columns={expenseInvoiceColumns(record.items ?? [], editable, invoiceSummary, (invoice) => openInvoiceModal(invoice), (id) => removeInvoiceMutation.mutate(id))}
         pagination={false}
         scroll={{ x: 1180 }}
         size="small"
       />
+      <Modal
+        title={editingInvoice ? '编辑发票' : '登记发票'}
+        open={invoiceModalOpen}
+        onCancel={() => {
+          setInvoiceModalOpen(false);
+          setEditingInvoice(null);
+          invoiceForm.resetFields();
+        }}
+        onOk={() => invoiceForm.submit()}
+        okButtonProps={{ loading: saveInvoiceMutation.isPending }}
+      >
+        <InvoiceForm form={invoiceForm} itemOptions={invoiceItemOptions} onFinish={(values) => saveInvoiceMutation.mutate(values)} />
+      </Modal>
 
       <Divider orientation="left">状态日志</Divider>
       <Table
@@ -2252,6 +2300,7 @@ function expenseInvoiceColumns(
   items: ExpenseReportItemRecord[],
   editable: boolean,
   summary: InvoiceSummary,
+  onEdit: (invoice: ExpenseInvoiceRecord) => void,
   onRemove: (id: string) => void,
 ): ColumnsType<ExpenseInvoiceRecord> {
   return [
@@ -2285,9 +2334,14 @@ function expenseInvoiceColumns(
     { title: '登记人', dataIndex: 'createdBy', width: 120, render: (user: ExpenseInvoiceRecord['createdBy']) => user.name },
     {
       title: '操作',
-      width: 90,
+      width: 150,
       render: (_: unknown, record) => (
-        <Button danger disabled={!editable} icon={<DeleteOutlined />} size="small" onClick={() => onRemove(record.id)} />
+        <Space>
+          <Button disabled={!editable} size="small" onClick={() => onEdit(record)}>
+            编辑
+          </Button>
+          <Button danger disabled={!editable} icon={<DeleteOutlined />} size="small" onClick={() => onRemove(record.id)} />
+        </Space>
       ),
     },
   ];
@@ -2373,6 +2427,60 @@ function MoneyField({ name, label }: { name: Array<string | number>; label: stri
     >
       <Input suffix="元" inputMode="decimal" />
     </Form.Item>
+  );
+}
+
+function InvoiceForm({
+  form,
+  itemOptions,
+  onFinish,
+}: {
+  form: FormInstance<InvoiceFormValues>;
+  itemOptions: Array<{ label: string; value?: string }>;
+  onFinish: (values: InvoiceFormValues) => void;
+}) {
+  return (
+    <Form form={form} layout="vertical" onFinish={onFinish}>
+      <Form.Item name="itemId" label="关联明细">
+        <Select allowClear options={itemOptions} showSearch optionFilterProp="label" />
+      </Form.Item>
+      <Form.Item name="invoiceCode" label="发票代码">
+        <Input />
+      </Form.Item>
+      <Form.Item name="invoiceNo" label="发票号码" rules={[{ required: true }]}>
+        <Input />
+      </Form.Item>
+      <Form.Item name="issuedAt" label="开票日期" rules={[{ required: true }]}>
+        <DatePicker className="full-width-control" />
+      </Form.Item>
+      <Form.Item name="sellerName" label="销方名称" rules={[{ required: true }]}>
+        <Input />
+      </Form.Item>
+      <Form.Item name="sellerTaxNo" label="销方税号">
+        <Input />
+      </Form.Item>
+      <Form.Item name="buyerName" label="购方名称">
+        <Input />
+      </Form.Item>
+      <Form.Item name="buyerTaxNo" label="购方税号">
+        <Input />
+      </Form.Item>
+      <Form.Item name="amountYuan" label="金额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="taxAmountYuan" label="税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="deductibleTaxYuan" label="可抵扣税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="totalAmountYuan" label="价税合计" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="currency" label="币种">
+        <Input />
+      </Form.Item>
+    </Form>
   );
 }
 
@@ -2542,6 +2650,16 @@ function columns(
     { title: resource === 'users' ? '工号' : '编码', dataIndex: resource === 'users' ? 'employeeNo' : 'code', width: 140 },
     { title: '名称', dataIndex: 'name', width: 160 },
     ...(resource === 'users' ? [{ title: '邮箱', dataIndex: 'email', width: 240 }] : []),
+    ...(resource === 'users'
+      ? [
+          {
+            title: '角色',
+            dataIndex: 'roles',
+            width: 260,
+            render: (roles: BaseRecord['roles']) => <UserRoleTags roles={roles} />,
+          },
+        ]
+      : []),
     ...(resource === 'roles'
       ? [
           {
@@ -2591,7 +2709,21 @@ function PermissionTags({ permissions }: { permissions?: BaseRecord['permissions
   );
 }
 
-function fields(resource: ResourceKey, editing: boolean, permissions: PermissionRecord[]) {
+function UserRoleTags({ roles }: { roles?: BaseRecord['roles'] }) {
+  if (!roles?.length) {
+    return <Text type="secondary">未分配</Text>;
+  }
+
+  return (
+    <div className="permission-tags">
+      {roles.map(({ role }) => (
+        <Tag key={role.id}>{role.name}</Tag>
+      ))}
+    </div>
+  );
+}
+
+function fields(resource: ResourceKey, editing: boolean, permissions: PermissionRecord[], referenceData: ReferenceData) {
   if (resource === 'users') {
     return (
       <>
@@ -2607,7 +2739,8 @@ function fields(resource: ResourceKey, editing: boolean, permissions: Permission
         <Form.Item name="password" label="密码" rules={editing ? [] : [{ required: true, min: 6 }]}>
           <Input.Password />
         </Form.Item>
-        <SharedFields />
+        <UserRolePicker roles={referenceData.roles} />
+        <SharedFields referenceData={referenceData} />
       </>
     );
   }
@@ -2640,8 +2773,21 @@ function fields(resource: ResourceKey, editing: boolean, permissions: Permission
       <Form.Item name="name" label="名称" rules={[{ required: true }]}>
         <Input />
       </Form.Item>
-      <SharedFields resource={resource} />
+      <SharedFields resource={resource} referenceData={referenceData} />
     </>
+  );
+}
+
+function UserRolePicker({ roles }: { roles: BaseRecord[] }) {
+  return (
+    <Form.Item name="roleIds" label="角色">
+      <Select
+        mode="multiple"
+        options={roles.map((role) => ({ label: `${role.name} (${role.code})`, value: role.id }))}
+        optionFilterProp="label"
+        placeholder="选择用户角色"
+      />
+    </Form.Item>
   );
 }
 
@@ -2657,17 +2803,84 @@ function RolePermissionPicker({ permissions }: { permissions: PermissionRecord[]
   );
 }
 
-function SharedFields({ resource }: { resource?: ResourceKey }) {
+function ReferenceSelect({
+  records,
+  placeholder,
+  value,
+  onChange,
+}: {
+  records: BaseRecord[];
+  placeholder: string;
+  value?: string;
+  onChange?: (value?: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const activeRecords = records.filter((record) => record.status !== 'DISABLED');
+  const selected = records.find((record) => record.id === value);
+  const quickOptions = activeRecords.slice(0, 3).map((record) => ({ label: referenceLabel(record), value: record.id }));
+
+  return (
+    <>
+      <Space.Compact className="reference-picker">
+        <Select
+          allowClear
+          showSearch
+          value={value}
+          options={selected && !quickOptions.some((option) => option.value === selected.id) ? [{ label: referenceLabel(selected), value: selected.id }, ...quickOptions] : quickOptions}
+          placeholder={placeholder}
+          optionFilterProp="label"
+          onChange={onChange}
+        />
+        <Button onClick={() => setOpen(true)}>选择</Button>
+      </Space.Compact>
+      <Modal title={placeholder} open={open} footer={null} onCancel={() => setOpen(false)} width={760}>
+        <Table
+          rowKey="id"
+          dataSource={activeRecords}
+          columns={[
+            { title: '编码', dataIndex: 'code', width: 160, render: (code?: string) => code ?? '-' },
+            { title: '名称', dataIndex: 'name' },
+            { title: '部门 ID', dataIndex: 'departmentId', width: 180, render: (id?: string | null) => id ?? '-' },
+            { title: '成本中心 ID', dataIndex: 'costCenterId', width: 180, render: (id?: string | null) => id ?? '-' },
+            {
+              title: '操作',
+              width: 90,
+              render: (_: unknown, record: BaseRecord) => (
+                <Button
+                  type="link"
+                  onClick={() => {
+                    onChange?.(record.id);
+                    setOpen(false);
+                  }}
+                >
+                  选择
+                </Button>
+              ),
+            },
+          ]}
+          pagination={{ pageSize: 8 }}
+          size="small"
+        />
+      </Modal>
+    </>
+  );
+}
+
+function referenceLabel(record: BaseRecord) {
+  return record.code ? `${record.name} (${record.code})` : record.name;
+}
+
+function SharedFields({ resource, referenceData }: { resource?: ResourceKey; referenceData: ReferenceData }) {
   return (
     <>
       {resource !== 'departments' && (
-        <Form.Item name="departmentId" label="部门 ID">
-          <Input />
+        <Form.Item name="departmentId" label="部门">
+          <ReferenceSelect records={referenceData.departments} placeholder="选择部门" />
         </Form.Item>
       )}
       {resource === 'projects' || !resource ? (
-        <Form.Item name="costCenterId" label="成本中心 ID">
-          <Input />
+        <Form.Item name="costCenterId" label="成本中心">
+          <ReferenceSelect records={referenceData.costCenters} placeholder="选择成本中心" />
         </Form.Item>
       ) : null}
       <Form.Item name="status" label="状态">
@@ -2678,6 +2891,13 @@ function SharedFields({ resource }: { resource?: ResourceKey }) {
 }
 
 function toFormValues(record: BaseRecord, resource: ResourceKey) {
+  if (resource === 'users') {
+    return {
+      ...record,
+      roleIds: record.roles?.map(({ role }) => role.id) ?? [],
+    };
+  }
+
   if (resource !== 'roles') {
     return record;
   }
@@ -2727,6 +2947,24 @@ function expenseFormPayload(values: ExpenseFormValues) {
   };
 }
 
+function invoicePayload(values: InvoiceFormValues, fallbackCurrency: string) {
+  return {
+    itemId: emptyToUndefined(values.itemId),
+    invoiceCode: emptyToUndefined(values.invoiceCode),
+    invoiceNo: values.invoiceNo,
+    issuedAt: values.issuedAt?.format('YYYY-MM-DD'),
+    sellerName: values.sellerName,
+    sellerTaxNo: emptyToUndefined(values.sellerTaxNo),
+    buyerName: emptyToUndefined(values.buyerName),
+    buyerTaxNo: emptyToUndefined(values.buyerTaxNo),
+    amountCents: yuanToCents(values.amountYuan),
+    taxAmountCents: yuanToCents(values.taxAmountYuan),
+    deductibleTaxCents: yuanToCents(values.deductibleTaxYuan),
+    totalAmountCents: yuanToCents(values.totalAmountYuan),
+    currency: emptyToUndefined(values.currency) ?? fallbackCurrency,
+  };
+}
+
 function budgetPayload(values: Record<string, unknown>) {
   const fiscalPeriod = values.fiscalPeriod && dayjs.isDayjs(values.fiscalPeriod) ? values.fiscalPeriod.format('YYYY-MM') : values.fiscalPeriod;
   return {
@@ -2742,6 +2980,24 @@ function budgetPayload(values: Record<string, unknown>) {
     totalCents: yuanToCents(values.totalYuan as string | undefined),
     warningThresholdBps: Number(values.warningThresholdBps ?? 9000),
     controlMode: values.controlMode ?? 'WARNING',
+  };
+}
+
+function invoiceToFormValues(invoice: ExpenseInvoiceRecord): InvoiceFormValues {
+  return {
+    itemId: invoice.itemId ?? undefined,
+    invoiceCode: invoice.invoiceCode ?? undefined,
+    invoiceNo: invoice.invoiceNo,
+    issuedAt: dayjs(invoice.issuedAt),
+    sellerName: invoice.sellerName,
+    sellerTaxNo: invoice.sellerTaxNo ?? undefined,
+    buyerName: invoice.buyerName ?? undefined,
+    buyerTaxNo: invoice.buyerTaxNo ?? undefined,
+    amountYuan: centsToYuan(invoice.amountCents),
+    taxAmountYuan: centsToYuan(invoice.taxAmountCents),
+    deductibleTaxYuan: centsToYuan(invoice.deductibleTaxCents),
+    totalAmountYuan: centsToYuan(invoice.totalAmountCents),
+    currency: invoice.currency,
   };
 }
 

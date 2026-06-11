@@ -368,6 +368,50 @@ describe('ExpenseReportsService', () => {
     );
   });
 
+  it('updates invoice metadata and ignores itself in duplicate check', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          status: ExpenseReportStatus.DRAFT,
+          currency: 'CNY',
+          departmentId: null,
+          costCenterId: null,
+          reimbursableCents: 12050,
+        }),
+      },
+      expenseInvoice: {
+        findFirst: vi.fn().mockResolvedValueOnce({ id: 'invoice_1' }).mockResolvedValueOnce(null),
+        update: vi.fn().mockResolvedValue({ id: 'invoice_1', invoiceNo: '87654321', duplicateStatus: 'UNIQUE' }),
+      },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new ExpenseReportsService(prisma as never);
+
+    await expect(
+      service.updateInvoice(user, 'report_1', 'invoice_1', {
+        invoiceNo: '87654321',
+        issuedAt: '2026-06-04',
+        sellerName: '测试供应商',
+        amountCents: 10000,
+        taxAmountCents: 600,
+        deductibleTaxCents: 600,
+        totalAmountCents: 10600,
+      }),
+    ).resolves.toEqual({ id: 'invoice_1', invoiceNo: '87654321', duplicateStatus: 'UNIQUE' });
+    expect(tx.expenseInvoice.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { not: 'invoice_1' } }),
+      }),
+    );
+    expect(tx.expenseInvoice.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'invoice_1' },
+        data: expect.objectContaining({ invoiceNo: '87654321', duplicateStatus: 'UNIQUE' }),
+      }),
+    );
+  });
+
   it('rejects invoice totals that do not equal amount plus tax', async () => {
     const service = new ExpenseReportsService({} as never);
 
