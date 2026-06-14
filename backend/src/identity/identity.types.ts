@@ -18,6 +18,8 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'exp:policy:write', name: '维护费用政策', description: '维护费用类型、政策和规则配置' },
   { code: 'exp:budget:read', name: '查看预算', description: '查看预算额度、占用、确认和实际发生情况' },
   { code: 'exp:budget:write', name: '维护预算', description: '维护预算额度、控制方式和预算调整入口' },
+  { code: 'exp:finance-review:read', name: '查看财务审核', description: '查看待财务审核、已审核报销单和财务审核记录' },
+  { code: 'exp:finance-review:review', name: '处理财务审核', description: '执行财务审核通过、退回补充或拒绝' },
 ];
 
 export interface AuthenticatedUser {

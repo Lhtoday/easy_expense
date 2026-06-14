@@ -180,7 +180,7 @@ export class ExpenseReportsService {
         },
         select: this.detailSelect(),
       });
-      await this.createApprovalInstance(tx, report.id, user, this.expensePolicies?.requiresEscalation(policyFindings) ?? false);
+      await this.createApprovalInstance(tx, report.id, user, this.expensePolicies?.requiresEscalation(policyFindings) ?? false, existing.status);
       return tx.expenseReport.findUnique({ where: { id }, select: this.detailSelect() });
     });
   }
@@ -551,19 +551,25 @@ export class ExpenseReportsService {
     if (!report) {
       throw new NotFoundException('报销单不存在');
     }
-    if (report.status !== ExpenseReportStatus.DRAFT && report.status !== ExpenseReportStatus.REJECTED) {
+    if (report.status !== ExpenseReportStatus.DRAFT && report.status !== ExpenseReportStatus.REJECTED && report.status !== ExpenseReportStatus.FINANCE_REJECTED) {
       throw new BadRequestException('只有草稿或已驳回状态的报销单可以编辑或提交');
     }
 
     return report;
   }
 
-  private async createApprovalInstance(tx: Prisma.TransactionClient, reportId: string, user: AuthenticatedUser, escalated: boolean) {
+  private async createApprovalInstance(
+    tx: Prisma.TransactionClient,
+    reportId: string,
+    user: AuthenticatedUser,
+    escalated: boolean,
+    previousStatus: ExpenseReportStatus,
+  ) {
     const approvedInstance = await tx.expenseApprovalInstance.findFirst({
       where: { reportId, status: ApprovalInstanceStatus.APPROVED },
       select: { id: true },
     });
-    if (approvedInstance) {
+    if (approvedInstance && previousStatus !== ExpenseReportStatus.FINANCE_REJECTED) {
       throw new BadRequestException('该报销单已存在通过的审批记录，不能重新提交生成新的审批任务');
     }
 
@@ -823,6 +829,18 @@ export class ExpenseReportsService {
           actualCents: true,
           releasedCents: true,
           budget: { select: { id: true, code: true, name: true } },
+        },
+      },
+      financeReviews: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          action: true,
+          fromStatus: true,
+          toStatus: true,
+          comment: true,
+          createdAt: true,
+          operator: { select: { id: true, name: true } },
         },
       },
     } satisfies Prisma.ExpenseReportSelect;

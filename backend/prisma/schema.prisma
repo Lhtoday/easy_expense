@@ -42,6 +42,9 @@ enum DataScopeType {
 enum ExpenseReportStatus {
   DRAFT
   SUBMITTED
+  BUSINESS_APPROVED
+  FINANCE_APPROVED
+  FINANCE_REJECTED
   APPROVED
   REJECTED
   VOIDED
@@ -54,7 +57,16 @@ enum ExpenseReportAction {
   WITHDRAW
   APPROVE
   REJECT
+  FINANCE_APPROVE
+  FINANCE_RETURN
+  FINANCE_REJECT
   VOID
+}
+
+enum FinanceReviewAction {
+  APPROVE
+  RETURN
+  REJECT
 }
 
 enum ApprovalFlowConfigStatus {
@@ -169,6 +181,7 @@ model User {
   createdBudgets        Budget[]              @relation("BudgetCreator")
   updatedBudgets        Budget[]              @relation("BudgetUpdater")
   operatedBudgetLogs    BudgetOperationLog[]  @relation("BudgetLogOperator")
+  operatedFinanceReviews ExpenseFinanceReview[] @relation("FinanceReviewOperator")
 
   @@map("iam_users")
 }
@@ -355,6 +368,7 @@ model ExpenseReport {
   policyChecks          ExpensePolicyCheck[]
   budgetOccupations     BudgetOccupation[]
   budgetChecks          ExpenseBudgetCheck[]
+  financeReviews        ExpenseFinanceReview[]
 
   @@index([applicantId, status])
   @@index([departmentId])
@@ -641,6 +655,23 @@ model BudgetOperationLog {
   @@index([occupationId])
   @@index([operatorId])
   @@map("bud_operation_logs")
+}
+
+model ExpenseFinanceReview {
+  id          String              @id @default(cuid())
+  reportId    String              @map("report_id")
+  operatorId  String              @map("operator_id")
+  action      FinanceReviewAction
+  fromStatus  ExpenseReportStatus @map("from_status")
+  toStatus    ExpenseReportStatus @map("to_status")
+  comment     String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  report      ExpenseReport       @relation(fields: [reportId], references: [id])
+  operator    User                @relation("FinanceReviewOperator", fields: [operatorId], references: [id])
+
+  @@index([reportId])
+  @@index([operatorId])
+  @@map("exp_finance_reviews")
 }
 
 model ExpenseAttachment {

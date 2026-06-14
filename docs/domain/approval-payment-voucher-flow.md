@@ -31,3 +31,12 @@ Record audit logs for:
 - Budget adjustment
 - Permission or role changes
 
+## Phase 7 Implementation Notes
+
+- Business approval now moves an expense report from `SUBMITTED` to `BUSINESS_APPROVED`.
+- Finance review uses `/finance-reviews/reports` for the workbench list and `/finance-reviews/reports/:id/approve`, `/return`, and `/reject` for audited actions.
+- Finance approval moves `BUSINESS_APPROVED` to `FINANCE_APPROVED` and confirms budget occupation.
+- Finance return moves `BUSINESS_APPROVED` to `FINANCE_REJECTED`, releases budget occupation, and allows the submitter to supplement and resubmit.
+- Finance rejection moves `BUSINESS_APPROVED` to `REJECTED` and releases budget occupation.
+- Finance review actions are recorded in `exp_finance_reviews` and mirrored into report status logs.
+- Finance approval must run finance review checks first. BLOCK issues such as missing account subjects, missing cost centers, inconsistent tax totals, duplicate invoices, or invalid invoice tax totals prevent approval.

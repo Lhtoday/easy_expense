@@ -52,11 +52,12 @@ type ApiResponse<T> = { success: boolean; data: T };
 type ApiErrorResponse = { success: false; error: { message: string } };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 type Status = 'ACTIVE' | 'DISABLED';
-type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'VOIDED';
+type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'BUSINESS_APPROVED' | 'FINANCE_APPROVED' | 'FINANCE_REJECTED' | 'APPROVED' | 'REJECTED' | 'VOIDED';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 type ResourceKey =
   | 'expense-reports'
   | 'approvals'
+  | 'finance-reviews'
   | 'expense-policies'
   | 'budgets'
   | 'users'
@@ -124,6 +125,8 @@ interface ExpenseReportRecord {
   policyChecks?: ExpensePolicyCheckRecord[];
   budgetChecks?: ExpenseBudgetCheckRecord[];
   budgetOccupations?: BudgetOccupationRecord[];
+  financeReviews?: FinanceReviewRecord[];
+  financeReviewChecks?: FinanceReviewCheckRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -143,7 +146,7 @@ interface ExpenseReportItemRecord {
 
 interface ExpenseReportLogRecord {
   id: string;
-  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'APPROVE' | 'REJECT' | 'VOID';
+  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'APPROVE' | 'REJECT' | 'FINANCE_APPROVE' | 'FINANCE_RETURN' | 'FINANCE_REJECT' | 'VOID';
   fromStatus?: ExpenseStatus | null;
   toStatus: ExpenseStatus;
   comment?: string | null;
@@ -181,6 +184,25 @@ interface ApprovalLogRecord {
   comment?: string | null;
   createdAt: string;
   operator: { id: string; name: string };
+}
+
+interface FinanceReviewRecord {
+  id: string;
+  action: 'APPROVE' | 'RETURN' | 'REJECT';
+  fromStatus: ExpenseStatus;
+  toStatus: ExpenseStatus;
+  comment?: string | null;
+  createdAt: string;
+  operator: { id: string; name: string };
+}
+
+interface FinanceReviewCheckRecord {
+  code: string;
+  category: 'ACCOUNTING_DIMENSION' | 'TAX' | 'INVOICE';
+  severity: 'PASS' | 'WARNING' | 'BLOCK';
+  message: string;
+  itemId?: string;
+  invoiceId?: string;
 }
 
 interface ExpenseAttachmentRecord {
@@ -371,6 +393,7 @@ const resources: Array<{
 }> = [
   { key: 'expense-reports', label: '报销单', icon: <FileTextOutlined />, readPermission: 'exp:report:read', writePermission: 'exp:report:write' },
   { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
+  { key: 'finance-reviews', label: '财务审核', icon: <SafetyOutlined />, readPermission: 'exp:finance-review:read', writePermission: 'exp:finance-review:review' },
   { key: 'expense-policies', label: '费用政策', icon: <ControlOutlined />, readPermission: 'exp:policy:read', writePermission: 'exp:policy:write' },
   { key: 'budgets', label: '预算控制', icon: <BankOutlined />, readPermission: 'exp:budget:read', writePermission: 'exp:budget:write' },
   { key: 'users', label: '用户', icon: <TeamOutlined />, readPermission: 'iam:user:read', writePermission: 'iam:user:write' },
@@ -403,6 +426,9 @@ const expenseTypeOptions = [
 const expenseStatusOptions: Array<{ label: string; value: ExpenseStatus }> = [
   { label: '草稿', value: 'DRAFT' },
   { label: '已提交', value: 'SUBMITTED' },
+  { label: '业务已通过', value: 'BUSINESS_APPROVED' },
+  { label: '财务已通过', value: 'FINANCE_APPROVED' },
+  { label: '财务退回', value: 'FINANCE_REJECTED' },
   { label: '已通过', value: 'APPROVED' },
   { label: '已驳回', value: 'REJECTED' },
   { label: '已作废', value: 'VOIDED' },
@@ -468,6 +494,10 @@ export function App() {
   const [approvalStatus, setApprovalStatus] = useState<ApprovalTaskStatus | undefined>('PENDING');
   const [approvalPage, setApprovalPage] = useState(1);
   const [approvalPageSize, setApprovalPageSize] = useState(10);
+  const [financeReviewKeyword, setFinanceReviewKeyword] = useState('');
+  const [financeReviewStatus, setFinanceReviewStatus] = useState<ExpenseStatus | undefined>('BUSINESS_APPROVED');
+  const [financeReviewPage, setFinanceReviewPage] = useState(1);
+  const [financeReviewPageSize, setFinanceReviewPageSize] = useState(10);
   const [form] = Form.useForm();
   const [expenseForm] = Form.useForm<ExpenseFormValues>();
   const queryClient = useQueryClient();
@@ -513,6 +543,7 @@ export function App() {
   const canWrite = activeResource !== 'permissions' && (me?.permissions.includes(currentResource.writePermission) ?? false);
   const canWithdrawExpense = me?.permissions.includes('exp:report:withdraw') ?? false;
   const canApprove = me?.permissions.includes('exp:approval:approve') ?? false;
+  const canFinanceReview = me?.permissions.includes('exp:finance-review:review') ?? false;
 
   const listQuery = useQuery<PageResult<BaseRecord>>({
     queryKey: [activeResource],
@@ -537,6 +568,7 @@ export function App() {
       Boolean(me) &&
       activeResource !== 'expense-reports' &&
       activeResource !== 'approvals' &&
+      activeResource !== 'finance-reviews' &&
       activeResource !== 'expense-policies' &&
       activeResource !== 'budgets',
   });
@@ -611,6 +643,23 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'approvals',
+  });
+
+  const financeReviewsQuery = useQuery<PageResult<ExpenseReportRecord>>({
+    queryKey: ['finance-reviews', financeReviewPage, financeReviewPageSize, financeReviewKeyword, financeReviewStatus],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ExpenseReportRecord>>>('/finance-reviews/reports', {
+        headers: authHeaders(),
+        params: {
+          page: financeReviewPage,
+          pageSize: financeReviewPageSize,
+          keyword: financeReviewKeyword || undefined,
+          status: financeReviewStatus,
+        },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'finance-reviews',
   });
 
   const expenseTypesQuery = useQuery<PageResult<ExpenseTypeRecord>>({
@@ -769,6 +818,20 @@ export function App() {
     onError: (error) => messageApi.error(apiErrorMessage(error, '审批处理失败，请检查任务状态或权限')),
   });
 
+  const handleFinanceReviewMutation = useMutation({
+    mutationFn: async ({ reportId, action, comment }: { reportId: string; action: 'approve' | 'return' | 'reject'; comment?: string }) =>
+      api.post(`/finance-reviews/reports/${reportId}/${action}`, { comment }, { headers: authHeaders() }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['finance-reviews'] });
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      if (expenseViewing) {
+        await refreshExpenseDetail(expenseViewing.id);
+      }
+      messageApi.success('财务审核已处理');
+    },
+    onError: (error) => messageApi.error(apiErrorMessage(error, '财务审核处理失败，请检查单据状态或权限')),
+  });
+
   const loginMutation = useMutation({
     mutationFn: async (values: { email: string; password: string }) => {
       const response = await api.post<ApiResponse<{ accessToken: string; user: SessionUser }>>('/auth/login', values);
@@ -806,7 +869,8 @@ export function App() {
   }
 
   async function openExpenseDetail(record: ExpenseReportRecord) {
-    const response = await api.get<ApiResponse<ExpenseReportRecord>>(`/expense-reports/${record.id}`, { headers: authHeaders() });
+    const detailUrl = activeResource === 'finance-reviews' ? `/finance-reviews/reports/${record.id}` : `/expense-reports/${record.id}`;
+    const response = await api.get<ApiResponse<ExpenseReportRecord>>(detailUrl, { headers: authHeaders() });
     setExpenseViewing(response.data.data);
     setExpenseDetailOpen(true);
   }
@@ -833,6 +897,26 @@ export function App() {
       okText: action === 'approve' ? '通过' : '驳回',
       okButtonProps: { danger: action === 'reject' },
       onOk: () => handleApprovalMutation.mutate({ taskId: task.id, action, comment: comment.trim() || undefined }),
+    });
+  }
+
+  function openFinanceReviewConfirm(record: ExpenseReportRecord, action: 'approve' | 'return' | 'reject') {
+    let comment = '';
+    const titleMap = { approve: '财务审核通过', return: '退回补充', reject: '财务拒绝' };
+    Modal.confirm({
+      title: titleMap[action],
+      content: (
+        <Input.TextArea
+          rows={3}
+          placeholder="财务审核意见"
+          onChange={(event) => {
+            comment = event.target.value;
+          }}
+        />
+      ),
+      okText: action === 'approve' ? '通过' : action === 'return' ? '退回' : '拒绝',
+      okButtonProps: { danger: action !== 'approve' },
+      onOk: () => handleFinanceReviewMutation.mutate({ reportId: record.id, action, comment: comment.trim() || undefined }),
     });
   }
 
@@ -899,6 +983,8 @@ export function App() {
                 ? '草稿、明细和审批状态'
                 : activeResource === 'approvals'
                   ? '待办、已办和审批记录'
+                  : activeResource === 'finance-reviews'
+                    ? '会计维度、税额和发票复核'
                   : activeResource === 'expense-policies'
                     ? '费用类型、政策规则和超标控制'
                     : activeResource === 'budgets'
@@ -980,6 +1066,32 @@ export function App() {
                 setApprovalPage(1);
               }}
               onViewReport={(task) => void openExpenseDetail(task.report)}
+            />
+          ) : activeResource === 'finance-reviews' ? (
+            <FinanceReviewsView
+              canReview={canFinanceReview}
+              data={financeReviewsQuery.data}
+              keyword={financeReviewKeyword}
+              loading={financeReviewsQuery.isLoading || handleFinanceReviewMutation.isPending}
+              page={financeReviewPage}
+              pageSize={financeReviewPageSize}
+              status={financeReviewStatus}
+              onApprove={(record) => openFinanceReviewConfirm(record, 'approve')}
+              onPageChange={(page, pageSize) => {
+                setFinanceReviewPage(page);
+                setFinanceReviewPageSize(pageSize);
+              }}
+              onReject={(record) => openFinanceReviewConfirm(record, 'reject')}
+              onReturn={(record) => openFinanceReviewConfirm(record, 'return')}
+              onSearch={(keyword) => {
+                setFinanceReviewKeyword(keyword.trim());
+                setFinanceReviewPage(1);
+              }}
+              onStatusChange={(status) => {
+                setFinanceReviewStatus(status);
+                setFinanceReviewPage(1);
+              }}
+              onView={(record) => void openExpenseDetail(record)}
             />
           ) : activeResource === 'expense-policies' ? (
             <ExpensePoliciesView
@@ -1574,6 +1686,130 @@ function ApprovalTasksView({
   );
 }
 
+function FinanceReviewsView({
+  canReview,
+  data,
+  keyword,
+  loading,
+  page,
+  pageSize,
+  status,
+  onApprove,
+  onPageChange,
+  onReject,
+  onReturn,
+  onSearch,
+  onStatusChange,
+  onView,
+}: {
+  canReview: boolean;
+  data?: PageResult<ExpenseReportRecord>;
+  keyword: string;
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  status?: ExpenseStatus;
+  onApprove: (record: ExpenseReportRecord) => void;
+  onPageChange: (page: number, pageSize: number) => void;
+  onReject: (record: ExpenseReportRecord) => void;
+  onReturn: (record: ExpenseReportRecord) => void;
+  onSearch: (keyword: string) => void;
+  onStatusChange: (status?: ExpenseStatus) => void;
+  onView: (record: ExpenseReportRecord) => void;
+}) {
+  return (
+    <>
+      <div className="table-toolbar">
+        <Space className="expense-filters">
+          <Input.Search defaultValue={keyword} placeholder="搜索单号或标题" allowClear onSearch={onSearch} />
+          <Select
+            allowClear
+            placeholder="审核状态"
+            value={status}
+            options={expenseStatusOptions.filter((option) =>
+              ['BUSINESS_APPROVED', 'FINANCE_APPROVED', 'FINANCE_REJECTED', 'REJECTED'].includes(option.value),
+            )}
+            onChange={(value) => onStatusChange(value)}
+            className="expense-status-filter"
+          />
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        loading={loading}
+        dataSource={data?.items ?? []}
+        columns={financeReviewColumns(canReview, onApprove, onReturn, onReject, onView)}
+        scroll={{ x: 1280 }}
+        pagination={{ current: page, pageSize, total: data?.total, showSizeChanger: true }}
+        onChange={(pagination) => onPageChange(pagination.current ?? 1, pagination.pageSize ?? pageSize)}
+      />
+    </>
+  );
+}
+
+function financeReviewColumns(
+  canReview: boolean,
+  onApprove: (record: ExpenseReportRecord) => void,
+  onReturn: (record: ExpenseReportRecord) => void,
+  onReject: (record: ExpenseReportRecord) => void,
+  onView: (record: ExpenseReportRecord) => void,
+): ColumnsType<ExpenseReportRecord> {
+  return [
+    { title: '单号', dataIndex: 'reportNo', width: 170 },
+    { title: '标题', dataIndex: 'title', width: 180 },
+    { title: '状态', dataIndex: 'status', width: 130, render: (status: ExpenseStatus) => <ExpenseStatusTag status={status} /> },
+    { title: '申请人', dataIndex: 'applicant', width: 120, render: (applicant?: ExpenseReportRecord['applicant']) => applicant?.name ?? '-' },
+    { title: '费用金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
+    { title: '税额', dataIndex: 'taxAmountCents', width: 110, align: 'right', render: formatMoney },
+    { title: '可抵扣税额', dataIndex: 'deductibleTaxCents', width: 130, align: 'right', render: formatMoney },
+    { title: '可报销金额', dataIndex: 'reimbursableCents', width: 130, align: 'right', render: formatMoney },
+    { title: '成本中心', dataIndex: 'costCenter', width: 150, render: (costCenter?: ExpenseReportRecord['costCenter']) => costCenter?.name ?? '-' },
+    {
+      title: '复核',
+      width: 170,
+      render: (_: unknown, record) => {
+        const financeChecks = record.financeReviewChecks ?? [];
+        const blockCount = financeChecks.filter((check) => check.severity === 'BLOCK').length;
+        const warningCount = financeChecks.filter((check) => check.severity === 'WARNING').length;
+        const policyCount = record.policyChecks?.filter((check) => check.result !== 'PASS').length ?? 0;
+        const budgetCount = record.budgetChecks?.filter((check) => check.result !== 'PASS').length ?? 0;
+        return blockCount || warningCount || policyCount || budgetCount ? (
+          <Space>
+            {blockCount ? <Tag color="error">阻断 {blockCount}</Tag> : null}
+            {warningCount ? <Tag color="warning">提醒 {warningCount}</Tag> : null}
+            {policyCount ? <Tag color="warning">政策 {policyCount}</Tag> : null}
+            {budgetCount ? <Tag color="warning">预算 {budgetCount}</Tag> : null}
+          </Space>
+        ) : (
+          <Tag color="success">正常</Tag>
+        );
+      },
+    },
+    { title: '提交时间', dataIndex: 'submittedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    {
+      title: '操作',
+      width: 290,
+      fixed: 'right',
+      render: (_: unknown, record) => (
+        <Space>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => onView(record)}>
+            查看
+          </Button>
+          <Button size="small" type="primary" disabled={!canReview || record.status !== 'BUSINESS_APPROVED'} onClick={() => onApprove(record)}>
+            通过
+          </Button>
+          <Button size="small" disabled={!canReview || record.status !== 'BUSINESS_APPROVED'} onClick={() => onReturn(record)}>
+            退回
+          </Button>
+          <Button size="small" danger disabled={!canReview || record.status !== 'BUSINESS_APPROVED'} onClick={() => onReject(record)}>
+            拒绝
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+}
+
 function approvalTaskColumns(
   canApprove: boolean,
   onApprove: (task: ApprovalTaskRecord) => void,
@@ -1963,6 +2199,8 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
         <Descriptions.Item label="实付金额">{formatMoney(record.paidAmountCents)}</Descriptions.Item>
       </Descriptions>
 
+      {record.financeReviewChecks ? <FinanceReviewCheckPanel checks={record.financeReviewChecks} /> : null}
+
       <InvoiceCheckPanel summary={invoiceSummary} />
 
       <PolicyCheckPanel checks={record.policyChecks ?? []} />
@@ -2113,6 +2351,42 @@ interface InvoiceSummary {
   duplicateInvoices: ExpenseInvoiceRecord[];
   unlinkedInvoices: ExpenseInvoiceRecord[];
   uncoveredItems: ExpenseReportItemRecord[];
+}
+
+function FinanceReviewCheckPanel({ checks }: { checks: FinanceReviewCheckRecord[] }) {
+  const severity = checks.some((check) => check.severity === 'BLOCK')
+    ? 'error'
+    : checks.some((check) => check.severity === 'WARNING')
+      ? 'warning'
+      : 'success';
+
+  return (
+    <Alert
+      className="invoice-check-panel"
+      type={severity}
+      showIcon
+      message="财务复核"
+      description={
+        <Table
+          rowKey={(record) => `${record.code}-${record.itemId ?? record.invoiceId ?? record.message}`}
+          size="small"
+          dataSource={checks}
+          columns={financeReviewCheckColumns()}
+          pagination={false}
+          scroll={{ x: 820 }}
+        />
+      }
+    />
+  );
+}
+
+function financeReviewCheckColumns(): ColumnsType<FinanceReviewCheckRecord> {
+  return [
+    { title: '级别', dataIndex: 'severity', width: 100, render: (severity: FinanceReviewCheckRecord['severity']) => <FinanceReviewSeverityTag severity={severity} /> },
+    { title: '类别', dataIndex: 'category', width: 140, render: financeReviewCategoryName },
+    { title: '编码', dataIndex: 'code', width: 210 },
+    { title: '说明', dataIndex: 'message', width: 360 },
+  ];
 }
 
 function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
@@ -2488,6 +2762,9 @@ function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
   const config = {
     DRAFT: { color: 'default', label: '草稿' },
     SUBMITTED: { color: 'processing', label: '已提交' },
+    BUSINESS_APPROVED: { color: 'blue', label: '业务已通过' },
+    FINANCE_APPROVED: { color: 'success', label: '财务已通过' },
+    FINANCE_REJECTED: { color: 'warning', label: '财务退回' },
     APPROVED: { color: 'success', label: '已通过' },
     REJECTED: { color: 'warning', label: '已驳回' },
     VOIDED: { color: 'error', label: '已作废' },
@@ -2496,7 +2773,7 @@ function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
 }
 
 function isEditableExpenseStatus(status: ExpenseStatus) {
-  return status === 'DRAFT' || status === 'REJECTED';
+  return status === 'DRAFT' || status === 'REJECTED' || status === 'FINANCE_REJECTED';
 }
 
 function ApprovalTaskStatusTag({ status }: { status: ApprovalTaskStatus }) {
@@ -2517,6 +2794,24 @@ function PolicyCheckTag({ result }: { result: ExpensePolicyCheckResult }) {
     ESCALATE: { color: 'processing', label: '升级' },
   }[result];
   return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function FinanceReviewSeverityTag({ severity }: { severity: FinanceReviewCheckRecord['severity'] }) {
+  const config = {
+    PASS: { color: 'success', label: '通过' },
+    WARNING: { color: 'warning', label: '提醒' },
+    BLOCK: { color: 'error', label: '阻断' },
+  }[severity];
+  return <Tag color={config.color}>{config.label}</Tag>;
+}
+
+function financeReviewCategoryName(category: FinanceReviewCheckRecord['category']) {
+  const names = {
+    ACCOUNTING_DIMENSION: '会计维度',
+    TAX: '税额',
+    INVOICE: '发票',
+  };
+  return names[category];
 }
 
 function BudgetCheckTag({ result }: { result: BudgetCheckResult }) {
@@ -2583,6 +2878,9 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     WITHDRAW: '撤回',
     APPROVE: '审批通过',
     REJECT: '审批驳回',
+    FINANCE_APPROVE: '财务审核通过',
+    FINANCE_RETURN: '财务退回补充',
+    FINANCE_REJECT: '财务拒绝',
     VOID: '作废',
   };
   return names[action];

@@ -52,7 +52,7 @@ export class ApprovalsService {
   }
 
   approve(user: AuthenticatedUser, taskId: string, comment?: string) {
-    return this.handleTask(user, taskId, ApprovalTaskStatus.APPROVED, ExpenseReportStatus.APPROVED, ExpenseReportAction.APPROVE, comment);
+    return this.handleTask(user, taskId, ApprovalTaskStatus.APPROVED, ExpenseReportStatus.BUSINESS_APPROVED, ExpenseReportAction.APPROVE, comment);
   }
 
   reject(user: AuthenticatedUser, taskId: string, comment?: string) {
@@ -125,12 +125,8 @@ export class ApprovalsService {
           comment,
         },
       });
-      if (this.budgets) {
-        if (taskStatus === ApprovalTaskStatus.APPROVED) {
-          await this.budgets.confirmApproved(tx, task.reportId, user.id);
-        } else {
-          await this.budgets.releaseReport(tx, task.reportId, user.id, comment ?? '审批驳回释放预算占用');
-        }
+      if (this.budgets && taskStatus === ApprovalTaskStatus.REJECTED) {
+        await this.budgets.releaseReport(tx, task.reportId, user.id, comment ?? '审批驳回释放预算占用');
       }
       await tx.expenseReport.update({
         where: { id: task.reportId },
