@@ -40,3 +40,4 @@ Record audit logs for:
 - Finance rejection moves `BUSINESS_APPROVED` to `REJECTED` and releases budget occupation.
 - Finance review actions are recorded in `exp_finance_reviews` and mirrored into report status logs.
 - Finance approval must run finance review checks first. BLOCK issues such as missing account subjects, missing cost centers, inconsistent tax totals, duplicate invoices, or invalid invoice tax totals prevent approval.
+- Finance reviewers may adjust report item account subject, cost center, project, tax amount, and deductible tax amount while the report is `BUSINESS_APPROVED`. The adjustment keeps the report status unchanged, recalculates report totals, records `ADJUST` in `exp_finance_reviews`, and mirrors `FINANCE_ADJUST` into report status logs.

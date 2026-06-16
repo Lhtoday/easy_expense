@@ -4,7 +4,7 @@ import { BudgetsService } from '../budgets/budgets.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
-import { FinanceReviewListQueryDto } from './finance-review.dto';
+import { AdjustFinanceReviewItemDto, FinanceReviewListQueryDto } from './finance-review.dto';
 
 export type FinanceReviewCheckSeverity = 'PASS' | 'WARNING' | 'BLOCK';
 export type FinanceReviewCheckCategory = 'ACCOUNTING_DIMENSION' | 'TAX' | 'INVOICE';
@@ -76,6 +76,121 @@ export class FinanceReviewsService {
     return this.handle(user, reportId, FinanceReviewAction.REJECT, ExpenseReportStatus.REJECTED, ExpenseReportAction.FINANCE_REJECT, comment);
   }
 
+  async adjustItem(user: AuthenticatedUser, reportId: string, itemId: string, dto: AdjustFinanceReviewItemDto) {
+    this.ensurePermission(user, 'exp:finance-review:review');
+
+    return this.prisma.$transaction(async (tx) => {
+      const report = await tx.expenseReport.findFirst({
+        where: { id: reportId, deletedAt: null },
+        select: {
+          id: true,
+          status: true,
+          currency: true,
+          items: {
+            where: { id: itemId },
+            select: {
+              id: true,
+              accountSubjectCode: true,
+              costCenterId: true,
+              projectId: true,
+              taxAmountCents: true,
+              deductibleTaxCents: true,
+            },
+          },
+        },
+      });
+      if (!report) {
+        throw new NotFoundException('Finance review report does not exist.');
+      }
+      if (report.status !== ExpenseReportStatus.BUSINESS_APPROVED) {
+        throw new BadRequestException('Only business-approved reports can be adjusted by finance review.');
+      }
+      const item = report.items[0];
+      if (!item) {
+        throw new NotFoundException('Finance review item does not exist.');
+      }
+
+      const nextTaxAmountCents = dto.taxAmountCents ?? item.taxAmountCents;
+      const nextDeductibleTaxCents = dto.deductibleTaxCents ?? item.deductibleTaxCents;
+      if (nextDeductibleTaxCents > nextTaxAmountCents) {
+        throw new BadRequestException('Deductible tax amount cannot exceed tax amount.');
+      }
+
+      const updateData: Prisma.ExpenseReportItemUpdateInput = {};
+      if (dto.accountSubjectCode !== undefined) {
+        updateData.accountSubjectCode = this.optionalString(dto.accountSubjectCode);
+      }
+      if (dto.costCenterId !== undefined) {
+        updateData.costCenter = dto.costCenterId.trim() ? { connect: { id: dto.costCenterId.trim() } } : { disconnect: true };
+      }
+      if (dto.projectId !== undefined) {
+        updateData.project = dto.projectId.trim() ? { connect: { id: dto.projectId.trim() } } : { disconnect: true };
+      }
+      if (dto.taxAmountCents !== undefined) {
+        updateData.taxAmountCents = dto.taxAmountCents;
+      }
+      if (dto.deductibleTaxCents !== undefined) {
+        updateData.deductibleTaxCents = dto.deductibleTaxCents;
+      }
+      if (!Object.keys(updateData).length) {
+        throw new BadRequestException('No finance review adjustment fields were provided.');
+      }
+
+      await tx.expenseReportItem.update({
+        where: { id: itemId },
+        data: updateData,
+      });
+
+      const items = await tx.expenseReportItem.findMany({
+        where: { reportId },
+        select: { amountCents: true, taxAmountCents: true, deductibleTaxCents: true, reimbursableCents: true },
+      });
+      const totals = items.reduce(
+        (result, current) => ({
+          amountCents: result.amountCents + current.amountCents,
+          taxAmountCents: result.taxAmountCents + current.taxAmountCents,
+          deductibleTaxCents: result.deductibleTaxCents + current.deductibleTaxCents,
+          reimbursableCents: result.reimbursableCents + current.reimbursableCents,
+        }),
+        { amountCents: 0, taxAmountCents: 0, deductibleTaxCents: 0, reimbursableCents: 0 },
+      );
+      const comment = dto.comment?.trim() || this.adjustmentComment(item, {
+        accountSubjectCode: dto.accountSubjectCode,
+        costCenterId: dto.costCenterId,
+        projectId: dto.projectId,
+        taxAmountCents: dto.taxAmountCents,
+        deductibleTaxCents: dto.deductibleTaxCents,
+      });
+
+      await tx.expenseFinanceReview.create({
+        data: {
+          reportId,
+          operatorId: user.id,
+          action: FinanceReviewAction.ADJUST,
+          fromStatus: report.status,
+          toStatus: report.status,
+          comment,
+        },
+      });
+      await tx.expenseReportLog.create({
+        data: {
+          reportId,
+          operatorId: user.id,
+          action: ExpenseReportAction.FINANCE_ADJUST,
+          fromStatus: report.status,
+          toStatus: report.status,
+          comment,
+        },
+      });
+
+      return tx.expenseReport.update({
+        where: { id: reportId },
+        data: { ...totals, updatedById: user.id },
+        select: this.reportSelect(),
+      }).then((updatedReport) => this.withFinanceReviewChecks(updatedReport));
+    });
+  }
+
   private async handle(
     user: AuthenticatedUser,
     reportId: string,
@@ -143,6 +258,37 @@ export class FinanceReviewsService {
     if (!user.permissions.includes(permission)) {
       throw new ForbiddenException('Missing finance review permission.');
     }
+  }
+
+  private optionalString(value: string) {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  private adjustmentComment(
+    previous: {
+      accountSubjectCode?: string | null;
+      costCenterId?: string | null;
+      projectId?: string | null;
+      taxAmountCents: number;
+      deductibleTaxCents: number;
+    },
+    next: {
+      accountSubjectCode?: string;
+      costCenterId?: string;
+      projectId?: string;
+      taxAmountCents?: number;
+      deductibleTaxCents?: number;
+    },
+  ) {
+    const changes = [
+      next.accountSubjectCode !== undefined && `accountSubjectCode: ${previous.accountSubjectCode ?? '-'} -> ${this.optionalString(next.accountSubjectCode) ?? '-'}`,
+      next.costCenterId !== undefined && `costCenterId: ${previous.costCenterId ?? '-'} -> ${this.optionalString(next.costCenterId) ?? '-'}`,
+      next.projectId !== undefined && `projectId: ${previous.projectId ?? '-'} -> ${this.optionalString(next.projectId) ?? '-'}`,
+      next.taxAmountCents !== undefined && `taxAmountCents: ${previous.taxAmountCents} -> ${next.taxAmountCents}`,
+      next.deductibleTaxCents !== undefined && `deductibleTaxCents: ${previous.deductibleTaxCents} -> ${next.deductibleTaxCents}`,
+    ].filter(Boolean);
+    return `Finance review adjustment. ${changes.join('; ')}`;
   }
 
   private reportSelect() {
@@ -229,11 +375,11 @@ export class FinanceReviewsService {
     } satisfies Prisma.ExpenseReportSelect;
   }
 
-  private withFinanceReviewChecks<T extends { items?: unknown[]; invoices?: unknown[]; amountCents: number; taxAmountCents: number; deductibleTaxCents: number }>(report: T) {
+  private withFinanceReviewChecks<T extends { items?: unknown[]; invoices?: unknown[]; amountCents: number; taxAmountCents: number; deductibleTaxCents: number; currency?: string; submittedAt?: Date | string | null }>(report: T) {
     return { ...report, financeReviewChecks: this.buildFinanceReviewChecks(report) };
   }
 
-  private buildFinanceReviewChecks(report: { items?: unknown[]; invoices?: unknown[]; amountCents: number; taxAmountCents: number; deductibleTaxCents: number }): FinanceReviewCheck[] {
+  private buildFinanceReviewChecks(report: { items?: unknown[]; invoices?: unknown[]; amountCents: number; taxAmountCents: number; deductibleTaxCents: number; currency?: string; submittedAt?: Date | string | null }): FinanceReviewCheck[] {
     const checks: FinanceReviewCheck[] = [];
     const items = (report.items ?? []) as Array<{
       id: string;
@@ -249,17 +395,25 @@ export class FinanceReviewsService {
     const invoices = (report.invoices ?? []) as Array<{
       id: string;
       itemId?: string | null;
+      invoiceCode?: string | null;
       invoiceNo: string;
+      issuedAt?: Date | string;
+      sellerName: string;
+      sellerTaxNo?: string | null;
+      buyerName?: string | null;
+      buyerTaxNo?: string | null;
       duplicateStatus: 'UNIQUE' | 'DUPLICATE';
       amountCents: number;
       taxAmountCents: number;
       totalAmountCents: number;
       deductibleTaxCents: number;
+      currency?: string;
     }>;
 
     const itemAmountCents = items.reduce((sum, item) => sum + item.amountCents, 0);
     const itemTaxCents = items.reduce((sum, item) => sum + item.taxAmountCents, 0);
     const itemDeductibleTaxCents = items.reduce((sum, item) => sum + item.deductibleTaxCents, 0);
+    const submittedAt = report.submittedAt ? new Date(report.submittedAt) : null;
 
     if (itemAmountCents !== report.amountCents || itemTaxCents !== report.taxAmountCents || itemDeductibleTaxCents !== report.deductibleTaxCents) {
       checks.push({
@@ -311,13 +465,14 @@ export class FinanceReviewsService {
     });
 
     invoices.forEach((invoice) => {
+      const invoiceLabel = this.invoiceLabel(invoice);
       if (invoice.duplicateStatus === 'DUPLICATE') {
         checks.push({
           code: 'DUPLICATE_INVOICE',
           category: 'INVOICE',
           severity: 'BLOCK',
           invoiceId: invoice.id,
-          message: `发票 ${invoice.invoiceNo} 存在重复。`,
+          message: `${invoiceLabel} 存在重复。`,
         });
       }
       if (!invoice.itemId) {
@@ -326,7 +481,16 @@ export class FinanceReviewsService {
           category: 'INVOICE',
           severity: 'WARNING',
           invoiceId: invoice.id,
-          message: `发票 ${invoice.invoiceNo} 未关联报销明细。`,
+          message: `${invoiceLabel} 未关联报销明细。`,
+        });
+      }
+      if (invoice.currency && report.currency && invoice.currency !== report.currency) {
+        checks.push({
+          code: 'INVOICE_CURRENCY_MISMATCH',
+          category: 'INVOICE',
+          severity: 'BLOCK',
+          invoiceId: invoice.id,
+          message: `${invoiceLabel} 币种 ${invoice.currency} 与报销单币种 ${report.currency} 不一致。`,
         });
       }
       if (invoice.amountCents + invoice.taxAmountCents !== invoice.totalAmountCents) {
@@ -335,7 +499,7 @@ export class FinanceReviewsService {
           category: 'INVOICE',
           severity: 'BLOCK',
           invoiceId: invoice.id,
-          message: `发票 ${invoice.invoiceNo} 的金额与价税合计不一致。`,
+          message: `${invoiceLabel} 的金额与价税合计不一致。`,
         });
       }
       if (invoice.deductibleTaxCents > invoice.taxAmountCents) {
@@ -344,20 +508,53 @@ export class FinanceReviewsService {
           category: 'TAX',
           severity: 'BLOCK',
           invoiceId: invoice.id,
-          message: `发票 ${invoice.invoiceNo} 可抵扣税额大于税额。`,
+          message: `${invoiceLabel} 可抵扣税额大于税额。`,
+        });
+      }
+      if (!invoice.sellerTaxNo) {
+        checks.push({
+          code: 'INVOICE_MISSING_SELLER_TAX_NO',
+          category: 'INVOICE',
+          severity: 'WARNING',
+          invoiceId: invoice.id,
+          message: `${invoiceLabel} 缺少销方税号，请人工确认票据合规性。`,
+        });
+      }
+      if (!invoice.buyerName || !invoice.buyerTaxNo) {
+        checks.push({
+          code: 'INVOICE_MISSING_BUYER_INFO',
+          category: 'INVOICE',
+          severity: 'WARNING',
+          invoiceId: invoice.id,
+          message: `${invoiceLabel} 缺少购方名称或税号，请确认是否为公司抬头。`,
+        });
+      }
+      if (submittedAt && invoice.issuedAt && new Date(invoice.issuedAt) > submittedAt) {
+        checks.push({
+          code: 'INVOICE_ISSUED_AFTER_SUBMIT',
+          category: 'INVOICE',
+          severity: 'WARNING',
+          invoiceId: invoice.id,
+          message: `${invoiceLabel} 开票日期晚于报销提交时间。`,
         });
       }
     });
 
     const invoiceAmountByItem = new Map<string, number>();
+    const invoiceTaxByItem = new Map<string, number>();
+    const invoiceDeductibleTaxByItem = new Map<string, number>();
     invoices.forEach((invoice) => {
       if (!invoice.itemId || invoice.duplicateStatus === 'DUPLICATE') {
         return;
       }
       invoiceAmountByItem.set(invoice.itemId, (invoiceAmountByItem.get(invoice.itemId) ?? 0) + invoice.totalAmountCents);
+      invoiceTaxByItem.set(invoice.itemId, (invoiceTaxByItem.get(invoice.itemId) ?? 0) + invoice.taxAmountCents);
+      invoiceDeductibleTaxByItem.set(invoice.itemId, (invoiceDeductibleTaxByItem.get(invoice.itemId) ?? 0) + invoice.deductibleTaxCents);
     });
     items.forEach((item) => {
       const linkedInvoiceTotal = invoiceAmountByItem.get(item.id) ?? 0;
+      const linkedInvoiceTax = invoiceTaxByItem.get(item.id) ?? 0;
+      const linkedInvoiceDeductibleTax = invoiceDeductibleTaxByItem.get(item.id) ?? 0;
       if (linkedInvoiceTotal === 0) {
         checks.push({
           code: 'ITEM_WITHOUT_INVOICE',
@@ -374,6 +571,32 @@ export class FinanceReviewsService {
           itemId: item.id,
           message: `${item.description} 关联发票价税合计小于费用金额。`,
         });
+      } else if (linkedInvoiceTotal > item.amountCents) {
+        checks.push({
+          code: 'ITEM_INVOICE_AMOUNT_OVER',
+          category: 'INVOICE',
+          severity: 'WARNING',
+          itemId: item.id,
+          message: `${item.description} 关联发票价税合计大于费用金额，请确认是否存在多开或关联错误。`,
+        });
+      }
+      if (item.taxAmountCents > linkedInvoiceTax) {
+        checks.push({
+          code: 'ITEM_INVOICE_TAX_SHORT',
+          category: 'TAX',
+          severity: 'BLOCK',
+          itemId: item.id,
+          message: `${item.description} 明细税额大于关联发票税额合计。`,
+        });
+      }
+      if (item.deductibleTaxCents > linkedInvoiceDeductibleTax) {
+        checks.push({
+          code: 'ITEM_INVOICE_DEDUCTIBLE_TAX_SHORT',
+          category: 'TAX',
+          severity: 'BLOCK',
+          itemId: item.id,
+          message: `${item.description} 明细可抵扣税额大于关联发票可抵扣税额合计。`,
+        });
       }
     });
 
@@ -387,5 +610,9 @@ export class FinanceReviewsService {
     }
 
     return checks;
+  }
+
+  private invoiceLabel(invoice: { invoiceCode?: string | null; invoiceNo: string }) {
+    return `发票 ${invoice.invoiceCode ? `${invoice.invoiceCode}-` : ''}${invoice.invoiceNo}`;
   }
 }

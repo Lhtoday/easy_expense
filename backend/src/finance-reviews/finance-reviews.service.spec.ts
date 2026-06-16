@@ -156,4 +156,148 @@ describe('FinanceReviewsService', () => {
     expect(tx.expenseFinanceReview.create).not.toHaveBeenCalled();
     expect(budgets.confirmApproved).not.toHaveBeenCalled();
   });
+
+  it('adjusts finance review item fields with audit records and report tax totals', async () => {
+    const report = {
+      id: 'report_1',
+      status: ExpenseReportStatus.BUSINESS_APPROVED,
+      currency: 'CNY',
+      items: [
+        {
+          id: 'item_1',
+          accountSubjectCode: null,
+          costCenterId: 'cc_old',
+          projectId: null,
+          taxAmountCents: 500,
+          deductibleTaxCents: 300,
+        },
+      ],
+    };
+    const updatedReport = {
+      id: 'report_1',
+      status: ExpenseReportStatus.BUSINESS_APPROVED,
+      amountCents: 10000,
+      taxAmountCents: 600,
+      deductibleTaxCents: 600,
+      items: [
+        {
+          id: 'item_1',
+          description: 'Taxi',
+          accountSubjectCode: '660201',
+          costCenterId: 'cc_new',
+          projectId: null,
+          amountCents: 10000,
+          taxAmountCents: 600,
+          deductibleTaxCents: 600,
+          reimbursableCents: 10000,
+        },
+      ],
+      invoices: [],
+    };
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue(report),
+        update: vi.fn().mockResolvedValue(updatedReport),
+      },
+      expenseReportItem: {
+        update: vi.fn().mockResolvedValue({ id: 'item_1' }),
+        findMany: vi.fn().mockResolvedValue([{ amountCents: 10000, taxAmountCents: 600, deductibleTaxCents: 600, reimbursableCents: 10000 }]),
+      },
+      expenseFinanceReview: { create: vi.fn().mockResolvedValue({ id: 'review_1' }) },
+      expenseReportLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new FinanceReviewsService(prisma as never, {} as never);
+
+    await expect(
+      service.adjustItem(user, 'report_1', 'item_1', {
+        accountSubjectCode: '660201',
+        costCenterId: 'cc_new',
+        taxAmountCents: 600,
+        deductibleTaxCents: 600,
+        comment: 'fix accounting and tax',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: 'report_1', taxAmountCents: 600, deductibleTaxCents: 600 }));
+    expect(tx.expenseReportItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'item_1' },
+        data: expect.objectContaining({
+          accountSubjectCode: '660201',
+          costCenter: { connect: { id: 'cc_new' } },
+          taxAmountCents: 600,
+          deductibleTaxCents: 600,
+        }),
+      }),
+    );
+    expect(tx.expenseReport.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ amountCents: 10000, taxAmountCents: 600, deductibleTaxCents: 600, reimbursableCents: 10000, updatedById: user.id }),
+      }),
+    );
+    expect(tx.expenseFinanceReview.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'ADJUST', fromStatus: ExpenseReportStatus.BUSINESS_APPROVED, toStatus: ExpenseReportStatus.BUSINESS_APPROVED }),
+      }),
+    );
+    expect(tx.expenseReportLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: 'FINANCE_ADJUST' }) }));
+  });
+
+  it('returns richer invoice exception checks for finance review detail', async () => {
+    const report = {
+      id: 'report_1',
+      status: ExpenseReportStatus.BUSINESS_APPROVED,
+      currency: 'CNY',
+      amountCents: 10000,
+      taxAmountCents: 600,
+      deductibleTaxCents: 600,
+      submittedAt: new Date('2026-06-10T00:00:00.000Z'),
+      items: [
+        {
+          id: 'item_1',
+          description: 'Taxi',
+          accountSubjectCode: '660201',
+          costCenterId: 'cc_1',
+          projectId: 'project_1',
+          amountCents: 10000,
+          taxAmountCents: 600,
+          deductibleTaxCents: 600,
+          reimbursableCents: 10000,
+        },
+      ],
+      invoices: [
+        {
+          id: 'invoice_1',
+          itemId: 'item_1',
+          invoiceCode: '044',
+          invoiceNo: 'INV001',
+          issuedAt: new Date('2026-06-11T00:00:00.000Z'),
+          sellerName: 'Seller',
+          sellerTaxNo: null,
+          buyerName: null,
+          buyerTaxNo: null,
+          duplicateStatus: 'UNIQUE',
+          amountCents: 9400,
+          taxAmountCents: 300,
+          totalAmountCents: 9700,
+          deductibleTaxCents: 300,
+          currency: 'USD',
+        },
+      ],
+    };
+    const prisma = { expenseReport: { findFirst: vi.fn().mockResolvedValue(report) } };
+    const service = new FinanceReviewsService(prisma as never, {} as never);
+
+    await expect(service.getReport(user, 'report_1')).resolves.toEqual(
+      expect.objectContaining({
+        financeReviewChecks: expect.arrayContaining([
+          expect.objectContaining({ code: 'INVOICE_CURRENCY_MISMATCH', severity: 'BLOCK' }),
+          expect.objectContaining({ code: 'INVOICE_MISSING_SELLER_TAX_NO', severity: 'WARNING' }),
+          expect.objectContaining({ code: 'INVOICE_MISSING_BUYER_INFO', severity: 'WARNING' }),
+          expect.objectContaining({ code: 'INVOICE_ISSUED_AFTER_SUBMIT', severity: 'WARNING' }),
+          expect.objectContaining({ code: 'ITEM_INVOICE_TAX_SHORT', severity: 'BLOCK' }),
+          expect.objectContaining({ code: 'ITEM_INVOICE_DEDUCTIBLE_TAX_SHORT', severity: 'BLOCK' }),
+        ]),
+      }),
+    );
+  });
 });

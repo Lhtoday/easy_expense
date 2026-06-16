@@ -29,3 +29,33 @@ export class HandleFinanceReviewDto {
   @IsString()
   comment?: string;
 }
+
+export class AdjustFinanceReviewItemDto {
+  @IsOptional()
+  @IsString()
+  accountSubjectCode?: string;
+
+  @IsOptional()
+  @IsString()
+  costCenterId?: string;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  taxAmountCents?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  deductibleTaxCents?: number;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
+}

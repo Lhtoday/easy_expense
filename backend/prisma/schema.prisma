@@ -60,6 +60,7 @@ enum ExpenseReportAction {
   FINANCE_APPROVE
   FINANCE_RETURN
   FINANCE_REJECT
+  FINANCE_ADJUST
   VOID
 }
 
@@ -67,6 +68,7 @@ enum FinanceReviewAction {
   APPROVE
   RETURN
   REJECT
+  ADJUST
 }
 
 enum ApprovalFlowConfigStatus {

@@ -146,7 +146,7 @@ interface ExpenseReportItemRecord {
 
 interface ExpenseReportLogRecord {
   id: string;
-  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'APPROVE' | 'REJECT' | 'FINANCE_APPROVE' | 'FINANCE_RETURN' | 'FINANCE_REJECT' | 'VOID';
+  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'APPROVE' | 'REJECT' | 'FINANCE_APPROVE' | 'FINANCE_RETURN' | 'FINANCE_REJECT' | 'FINANCE_ADJUST' | 'VOID';
   fromStatus?: ExpenseStatus | null;
   toStatus: ExpenseStatus;
   comment?: string | null;
@@ -188,7 +188,7 @@ interface ApprovalLogRecord {
 
 interface FinanceReviewRecord {
   id: string;
-  action: 'APPROVE' | 'RETURN' | 'REJECT';
+  action: 'APPROVE' | 'RETURN' | 'REJECT' | 'ADJUST';
   fromStatus: ExpenseStatus;
   toStatus: ExpenseStatus;
   comment?: string | null;
@@ -373,6 +373,15 @@ interface InvoiceFormValues {
   deductibleTaxYuan: string;
   totalAmountYuan: string;
   currency?: string;
+}
+
+interface FinanceReviewAdjustmentFormValues {
+  accountSubjectCode?: string;
+  costCenterId?: string;
+  projectId?: string;
+  taxAmountYuan?: string;
+  deductibleTaxYuan?: string;
+  comment?: string;
 }
 
 interface ReferenceData {
@@ -1160,7 +1169,13 @@ export function App() {
       </Modal>
       <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
         {expenseViewing ? (
-          <ExpenseReportDetail canWrite={canWrite} record={expenseViewing} onChanged={() => refreshExpenseDetail(expenseViewing.id)} />
+          <ExpenseReportDetail
+            canFinanceReview={canFinanceReview}
+            canWrite={canWrite}
+            record={expenseViewing}
+            referenceData={referenceData}
+            onChanged={() => refreshExpenseDetail(expenseViewing.id)}
+          />
         ) : null}
       </Modal>
     </Layout>
@@ -2079,12 +2094,26 @@ function ExpenseReportForm({
   );
 }
 
-function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolean; record: ExpenseReportRecord; onChanged: () => Promise<void> }) {
+function ExpenseReportDetail({
+  canFinanceReview,
+  canWrite,
+  record,
+  referenceData,
+  onChanged,
+}: {
+  canFinanceReview: boolean;
+  canWrite: boolean;
+  record: ExpenseReportRecord;
+  referenceData: ReferenceData;
+  onChanged: () => Promise<void>;
+}) {
   const [attachmentForm] = Form.useForm<AttachmentFormValues>();
   const [invoiceForm] = Form.useForm<InvoiceFormValues>();
+  const [financeAdjustmentForm] = Form.useForm<FinanceReviewAdjustmentFormValues>();
   const [attachmentFiles, setAttachmentFiles] = useState<UploadFile[]>([]);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<ExpenseInvoiceRecord | null>(null);
+  const [adjustingItem, setAdjustingItem] = useState<ExpenseReportItemRecord | null>(null);
 
   const uploadAttachmentMutation = useMutation({
     mutationFn: async (values: AttachmentFormValues) => {
@@ -2145,7 +2174,24 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
     onError: () => message.error('发票删除失败'),
   });
 
+  const adjustFinanceItemMutation = useMutation({
+    mutationFn: async (values: FinanceReviewAdjustmentFormValues) => {
+      if (!adjustingItem?.id) {
+        throw new Error('missing item');
+      }
+      return api.patch(`/finance-reviews/reports/${record.id}/items/${adjustingItem.id}`, financeAdjustmentPayload(values), { headers: authHeaders() });
+    },
+    onSuccess: async () => {
+      financeAdjustmentForm.resetFields();
+      setAdjustingItem(null);
+      await onChanged();
+      message.success('财务修正已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '财务修正失败，请检查单据状态、维度或税额')),
+  });
+
   const editable = canWrite && isEditableExpenseStatus(record.status);
+  const financeAdjustable = canFinanceReview && record.status === 'BUSINESS_APPROVED';
   const invoiceSummary = buildInvoiceSummary(record.items ?? [], record.invoices ?? []);
   const invoiceItemOptions = (record.items ?? [])
     .filter((item): item is ExpenseReportItemRecord & { id: string } => Boolean(item.id))
@@ -2159,6 +2205,17 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
     setEditingInvoice(invoice ?? null);
     invoiceForm.setFieldsValue(invoice ? invoiceToFormValues(invoice) : { currency: record.currency, taxAmountYuan: '0.00', deductibleTaxYuan: '0.00' });
     setInvoiceModalOpen(true);
+  }
+
+  function openFinanceAdjustmentModal(item: ExpenseReportItemRecord) {
+    setAdjustingItem(item);
+    financeAdjustmentForm.setFieldsValue({
+      accountSubjectCode: item.accountSubjectCode ?? undefined,
+      costCenterId: item.costCenterId ?? undefined,
+      projectId: item.projectId ?? undefined,
+      taxAmountYuan: centsToYuan(item.taxAmountCents),
+      deductibleTaxYuan: centsToYuan(item.deductibleTaxCents),
+    });
   }
 
   async function openAttachmentFile(attachment: ExpenseAttachmentRecord, mode: 'download' | 'preview') {
@@ -2211,7 +2268,7 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
       <Table
         rowKey={(item) => item.id ?? `${item.occurredAt}-${item.description}`}
         dataSource={record.items ?? []}
-        columns={expenseItemColumns(invoiceSummary)}
+        columns={expenseItemColumns(invoiceSummary, financeAdjustable, openFinanceAdjustmentModal)}
         pagination={false}
         scroll={{ x: 1080 }}
         size="small"
@@ -2294,6 +2351,19 @@ function ExpenseReportDetail({ canWrite, record, onChanged }: { canWrite: boolea
       >
         <InvoiceForm form={invoiceForm} itemOptions={invoiceItemOptions} onFinish={(values) => saveInvoiceMutation.mutate(values)} />
       </Modal>
+      <Modal
+        title="财务修正明细"
+        open={Boolean(adjustingItem)}
+        onCancel={() => {
+          setAdjustingItem(null);
+          financeAdjustmentForm.resetFields();
+        }}
+        onOk={() => financeAdjustmentForm.submit()}
+        okButtonProps={{ loading: adjustFinanceItemMutation.isPending }}
+        width={720}
+      >
+        <FinanceAdjustmentForm form={financeAdjustmentForm} referenceData={referenceData} onFinish={(values) => adjustFinanceItemMutation.mutate(values)} />
+      </Modal>
 
       <Divider orientation="left">状态日志</Divider>
       <Table
@@ -2359,20 +2429,35 @@ function FinanceReviewCheckPanel({ checks }: { checks: FinanceReviewCheckRecord[
     : checks.some((check) => check.severity === 'WARNING')
       ? 'warning'
       : 'success';
+  const categoryCounts = checks.reduce(
+    (result, check) => ({ ...result, [check.category]: (result[check.category] ?? 0) + 1 }),
+    {} as Record<FinanceReviewCheckRecord['category'], number>,
+  );
 
   return (
     <Alert
       className="invoice-check-panel"
       type={severity}
       showIcon
-      message="财务复核"
+      message={
+        <Space wrap>
+          <Text>财务复核</Text>
+          {Object.entries(categoryCounts).map(([category, count]) => (
+            <Tag key={category}>{financeReviewCategoryName(category as FinanceReviewCheckRecord['category'])} {count}</Tag>
+          ))}
+        </Space>
+      }
       description={
         <Table
           rowKey={(record) => `${record.code}-${record.itemId ?? record.invoiceId ?? record.message}`}
           size="small"
-          dataSource={checks}
+          dataSource={sortFinanceReviewChecks(checks)}
           columns={financeReviewCheckColumns()}
           pagination={false}
+          expandable={{
+            defaultExpandAllRows: false,
+            expandedRowRender: (record) => <Text type="secondary">{record.message}</Text>,
+          }}
           scroll={{ x: 820 }}
         />
       }
@@ -2384,9 +2469,26 @@ function financeReviewCheckColumns(): ColumnsType<FinanceReviewCheckRecord> {
   return [
     { title: '级别', dataIndex: 'severity', width: 100, render: (severity: FinanceReviewCheckRecord['severity']) => <FinanceReviewSeverityTag severity={severity} /> },
     { title: '类别', dataIndex: 'category', width: 140, render: financeReviewCategoryName },
+    { title: '定位', width: 150, render: (_: unknown, record) => financeReviewCheckTarget(record) },
     { title: '编码', dataIndex: 'code', width: 210 },
     { title: '说明', dataIndex: 'message', width: 360 },
   ];
+}
+
+function sortFinanceReviewChecks(checks: FinanceReviewCheckRecord[]) {
+  const severityRank = { BLOCK: 0, WARNING: 1, PASS: 2 };
+  const categoryRank = { INVOICE: 0, TAX: 1, ACCOUNTING_DIMENSION: 2 };
+  return [...checks].sort((left, right) => severityRank[left.severity] - severityRank[right.severity] || categoryRank[left.category] - categoryRank[right.category]);
+}
+
+function financeReviewCheckTarget(record: FinanceReviewCheckRecord) {
+  if (record.invoiceId) {
+    return <Tag color="blue">发票 {record.invoiceId.slice(0, 6)}</Tag>;
+  }
+  if (record.itemId) {
+    return <Tag color="purple">明细 {record.itemId.slice(0, 6)}</Tag>;
+  }
+  return <Text type="secondary">单据</Text>;
 }
 
 function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
@@ -2512,8 +2614,12 @@ function budgetOccupationColumns(): ColumnsType<BudgetOccupationRecord> {
   ];
 }
 
-function expenseItemColumns(summary: InvoiceSummary): ColumnsType<ExpenseReportItemRecord> {
-  return [
+function expenseItemColumns(
+  summary: InvoiceSummary,
+  financeAdjustable = false,
+  onFinanceAdjust?: (item: ExpenseReportItemRecord) => void,
+): ColumnsType<ExpenseReportItemRecord> {
+  const baseColumns: ColumnsType<ExpenseReportItemRecord> = [
     { title: '发生日期', dataIndex: 'occurredAt', width: 120, render: (value: string) => dayjs(value).format('YYYY-MM-DD') },
     { title: '费用类型', dataIndex: 'expenseTypeCode', width: 120, render: expenseTypeName },
     { title: '会计科目', dataIndex: 'accountSubjectCode', width: 120, render: (value?: string | null) => value ?? '-' },
@@ -2538,6 +2644,22 @@ function expenseItemColumns(summary: InvoiceSummary): ColumnsType<ExpenseReportI
           </Space>
         );
       },
+    },
+  ];
+  if (!financeAdjustable || !onFinanceAdjust) {
+    return baseColumns;
+  }
+  return [
+    ...baseColumns,
+    {
+      title: '操作',
+      width: 100,
+      fixed: 'right',
+      render: (_: unknown, item) => (
+        <Button size="small" onClick={() => onFinanceAdjust(item)}>
+          修正
+        </Button>
+      ),
     },
   ];
 }
@@ -2758,6 +2880,39 @@ function InvoiceForm({
   );
 }
 
+function FinanceAdjustmentForm({
+  form,
+  referenceData,
+  onFinish,
+}: {
+  form: FormInstance<FinanceReviewAdjustmentFormValues>;
+  referenceData: ReferenceData;
+  onFinish: (values: FinanceReviewAdjustmentFormValues) => void;
+}) {
+  return (
+    <Form form={form} layout="vertical" onFinish={onFinish}>
+      <Form.Item name="accountSubjectCode" label="会计科目" rules={[{ required: true }]}>
+        <Input placeholder="例如 660201" />
+      </Form.Item>
+      <Form.Item name="costCenterId" label="成本中心" rules={[{ required: true }]}>
+        <ReferenceSelect records={referenceData.costCenters} placeholder="选择成本中心" />
+      </Form.Item>
+      <Form.Item name="projectId" label="项目">
+        <ReferenceSelect records={referenceData.projects} placeholder="选择项目" />
+      </Form.Item>
+      <Form.Item name="taxAmountYuan" label="税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="deductibleTaxYuan" label="可抵扣税额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="comment" label="修正说明">
+        <Input.TextArea rows={3} placeholder="记录财务修正原因" />
+      </Form.Item>
+    </Form>
+  );
+}
+
 function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
   const config = {
     DRAFT: { color: 'default', label: '草稿' },
@@ -2881,6 +3036,7 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     FINANCE_APPROVE: '财务审核通过',
     FINANCE_RETURN: '财务退回补充',
     FINANCE_REJECT: '财务拒绝',
+    FINANCE_ADJUST: '财务修正',
     VOID: '作废',
   };
   return names[action];
@@ -3260,6 +3416,17 @@ function invoicePayload(values: InvoiceFormValues, fallbackCurrency: string) {
     deductibleTaxCents: yuanToCents(values.deductibleTaxYuan),
     totalAmountCents: yuanToCents(values.totalAmountYuan),
     currency: emptyToUndefined(values.currency) ?? fallbackCurrency,
+  };
+}
+
+function financeAdjustmentPayload(values: FinanceReviewAdjustmentFormValues) {
+  return {
+    accountSubjectCode: emptyToUndefined(values.accountSubjectCode),
+    costCenterId: emptyToUndefined(values.costCenterId),
+    projectId: emptyToUndefined(values.projectId),
+    taxAmountCents: yuanToCents(values.taxAmountYuan),
+    deductibleTaxCents: yuanToCents(values.deductibleTaxYuan),
+    comment: emptyToUndefined(values.comment),
   };
 }
 

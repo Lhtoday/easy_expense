@@ -32,15 +32,16 @@ Separate business approval from finance review and provide the first finance rev
 
 `prisma migrate status` requires Docker/PostgreSQL to be running with `DATABASE_URL=postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public`.
 
-## Current Progress (2026-06-11)
+## Current Progress (2026-06-16)
 
-- Status: in progress.
+- Status: completed.
 - Completed: Prisma schema and migration for finance review states/actions and `exp_finance_reviews`.
 - Completed: backend `finance-reviews` module with list, approve, return, and reject endpoints.
 - Completed: workflow split where business approval moves reports to `BUSINESS_APPROVED`, while finance approval moves reports to `FINANCE_APPROVED` and confirms budget occupation.
 - Completed: finance return/reject release budget occupation and write finance review plus report status audit records.
 - Completed: frontend finance review workbench with filtering, detail viewing, approve, return, and reject actions.
 - Completed: finance review checks for accounting dimensions, tax consistency, duplicate invoices, invoice linkage, and blocking approval when BLOCK issues exist.
-- Verified: `npm.cmd run db:generate`, `npm.cmd run test --workspace backend`, backend/frontend lint, and backend/frontend build.
-- Blocked verification: local `prisma migrate status` could not complete because Docker Desktop/PostgreSQL was not running.
-- Remaining: apply/check migration on a running local database, run browser smoke checks, then continue Phase 7 accounting dimension adjustment and editable tax correction workflows.
+- Completed: finance item adjustment endpoint and frontend adjustment dialog for account subject, cost center, project, tax amount, and deductible tax amount.
+- Completed: richer invoice exception review for currency mismatch, missing buyer/seller tax identity, late invoice dates, invoice tax coverage, and over-covered invoice amounts.
+- Verified: `npm.cmd run db:generate`, `npm.cmd run test --workspace backend`, backend/frontend lint, backend/frontend build, local `prisma migrate deploy/status`, backend health check, frontend HTTP check, finance review list API smoke, and browser click-level smoke check.
+- Remaining: none for Phase 7. Continue to Phase 8 payment flow when requested.

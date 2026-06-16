@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { CurrentUserGuard, RequestWithUser } from '../identity/current-user.guard';
-import { FinanceReviewListQueryDto, HandleFinanceReviewDto } from './finance-review.dto';
+import { AdjustFinanceReviewItemDto, FinanceReviewListQueryDto, HandleFinanceReviewDto } from './finance-review.dto';
 import { FinanceReviewsService } from './finance-reviews.service';
 
 @Controller('finance-reviews')
@@ -21,6 +21,11 @@ export class FinanceReviewsController {
   @Post('reports/:id/approve')
   approve(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: HandleFinanceReviewDto) {
     return this.service.approve(request.user, id, dto.comment);
+  }
+
+  @Patch('reports/:id/items/:itemId')
+  adjustItem(@Req() request: RequestWithUser, @Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: AdjustFinanceReviewItemDto) {
+    return this.service.adjustItem(request.user, id, itemId, dto);
   }
 
   @Post('reports/:id/return')
