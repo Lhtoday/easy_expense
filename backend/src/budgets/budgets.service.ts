@@ -5,6 +5,7 @@ import {
   BudgetControlMode,
   BudgetOccupationStatus,
   BudgetStatus,
+  ExpenseReportStatus,
   Prisma,
 } from '@prisma/client';
 import { AuthenticatedUser } from '../identity/identity.types';
@@ -14,6 +15,11 @@ import { BudgetListQueryDto, CreateBudgetDto, UpdateBudgetDto } from './budget.d
 
 type BudgetSnapshot = {
   id: string;
+  departmentId: string | null;
+  costCenterId: string | null;
+  projectId: string | null;
+  expenseTypeCode: string | null;
+  accountSubjectCode: string | null;
   totalCents: number;
   inTransitCents: number;
   approvedCents: number;
@@ -42,7 +48,6 @@ export class BudgetsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const where: Prisma.BudgetWhereInput = {
-      deletedAt: null,
       fiscalPeriod: query.fiscalPeriod,
       status: query.status,
       OR: query.keyword
@@ -118,8 +123,131 @@ export class BudgetsService {
     this.ensurePermission(user, 'exp:budget:write');
     return this.prisma.budget.update({
       where: { id },
-      data: { status: BudgetStatus.DISABLED, deletedAt: new Date(), updatedById: user.id },
+      data: { status: BudgetStatus.DISABLED, updatedById: user.id },
       select: this.budgetSelect(),
+    });
+  }
+
+  enable(user: AuthenticatedUser, id: string) {
+    this.ensurePermission(user, 'exp:budget:write');
+    return this.prisma.budget.update({
+      where: { id },
+      data: { status: BudgetStatus.ACTIVE, deletedAt: null, updatedById: user.id },
+      select: this.budgetSelect(),
+    });
+  }
+
+  async reconcilePaidReport(user: AuthenticatedUser, reportId: string) {
+    this.ensurePermission(user, 'exp:budget:write');
+
+    return this.prisma.$transaction(async (tx) => {
+      const report = await tx.expenseReport.findFirst({
+        where: { id: reportId, deletedAt: null },
+        select: {
+          id: true,
+          reportNo: true,
+          status: true,
+          currency: true,
+          paidAmountCents: true,
+          items: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              occurredAt: true,
+              departmentId: true,
+              costCenterId: true,
+              projectId: true,
+              expenseTypeCode: true,
+              accountSubjectCode: true,
+              reimbursableCents: true,
+            },
+          },
+        },
+      });
+      if (!report) {
+        throw new NotFoundException('鎶ラ攢鍗曚笉瀛樺湪');
+      }
+      if (report.status !== ExpenseReportStatus.PAID) {
+        throw new BadRequestException('Only paid reports can be reconciled into budget actual amount.');
+      }
+      if (report.paidAmountCents <= 0) {
+        throw new BadRequestException('Paid report has no paid amount to reconcile.');
+      }
+
+      await this.transferActual(tx, reportId, user.id, report.paidAmountCents);
+      const actualOccupations = await tx.budgetOccupation.findMany({
+        where: { reportId, status: BudgetOccupationStatus.ACTUAL },
+        select: { itemId: true, actualCents: true },
+      });
+      const actualItemIds = new Set(actualOccupations.filter((occupation) => occupation.actualCents > 0).map((occupation) => occupation.itemId));
+      const reconciled: Array<{ itemId: string; budgetId: string; amountCents: number }> = [];
+      const skipped: Array<{ itemId: string; reason: string }> = [];
+
+      for (const item of report.items) {
+        if (item.reimbursableCents <= 0) {
+          skipped.push({ itemId: item.id, reason: 'Item has no reimbursable amount.' });
+          continue;
+        }
+        if (actualItemIds.has(item.id)) {
+          skipped.push({ itemId: item.id, reason: 'Item already has actual budget occupation.' });
+          continue;
+        }
+
+        const period = this.periodOf(item.occurredAt);
+        const budget = await this.resolveBudget(tx, item, period, report.currency);
+        if (!budget) {
+          await tx.expenseBudgetCheck.create({
+            data: {
+              reportId,
+              itemId: item.id,
+              result: BudgetCheckResult.WARNING,
+              message: `${period} has no matching active budget for paid-report actual reconciliation.`,
+            },
+          });
+          skipped.push({ itemId: item.id, reason: 'No matching active budget.' });
+          continue;
+        }
+
+        await this.lockBudget(tx, budget.id);
+        const locked = await tx.budget.findUniqueOrThrow({ where: { id: budget.id }, select: this.budgetSnapshotSelect() });
+        const occupation = await tx.budgetOccupation.create({
+          data: {
+            budgetId: locked.id,
+            reportId,
+            itemId: item.id,
+            status: BudgetOccupationStatus.ACTUAL,
+            fiscalPeriod: period,
+            departmentId: item.departmentId,
+            costCenterId: item.costCenterId,
+            projectId: item.projectId,
+            expenseTypeCode: item.expenseTypeCode,
+            accountSubjectCode: item.accountSubjectCode,
+            currency: report.currency,
+            occupiedCents: 0,
+            actualCents: item.reimbursableCents,
+          },
+          select: { id: true },
+        });
+        await this.adjustBudget(
+          tx,
+          locked,
+          occupation.id,
+          user.id,
+          BudgetAction.ADJUST,
+          0,
+          0,
+          item.reimbursableCents,
+          `Backfill paid report ${report.reportNo} into budget actual amount.`,
+        );
+        reconciled.push({ itemId: item.id, budgetId: locked.id, amountCents: item.reimbursableCents });
+      }
+
+      return {
+        reportId,
+        reportNo: report.reportNo,
+        reconciled,
+        skipped,
+      };
     });
   }
 
@@ -306,20 +434,28 @@ export class BudgetsService {
   }
 
   private async resolveBudget(tx: Prisma.TransactionClient, item: ReportBudgetItem, fiscalPeriod: string, currency: string) {
-    return tx.budget.findFirst({
+    const candidates = await tx.budget.findMany({
       where: {
         deletedAt: null,
         status: BudgetStatus.ACTIVE,
         fiscalPeriod,
         currency,
-        departmentId: item.departmentId,
-        costCenterId: item.costCenterId,
-        projectId: item.projectId,
-        expenseTypeCode: item.expenseTypeCode,
-        accountSubjectCode: item.accountSubjectCode,
+        OR: [{ departmentId: item.departmentId }, { departmentId: null }],
+        AND: [
+          { OR: [{ costCenterId: item.costCenterId }, { costCenterId: null }] },
+          { OR: [{ projectId: item.projectId }, { projectId: null }] },
+          { OR: [{ expenseTypeCode: item.expenseTypeCode }, { expenseTypeCode: null }] },
+          { OR: [{ accountSubjectCode: item.accountSubjectCode }, { accountSubjectCode: null }] },
+        ],
       },
       select: this.budgetSnapshotSelect(),
     });
+    return candidates.sort((left, right) => this.budgetSpecificity(right) - this.budgetSpecificity(left))[0] ?? null;
+  }
+
+  private budgetSpecificity(budget: BudgetSnapshot) {
+    const dimensions = ['departmentId', 'costCenterId', 'projectId', 'expenseTypeCode', 'accountSubjectCode'] as const;
+    return dimensions.reduce((score, dimension) => score + (budget[dimension] ? 1 : 0), 0);
   }
 
   private async lockBudget(tx: Prisma.TransactionClient, budgetId: string) {
@@ -393,6 +529,11 @@ export class BudgetsService {
   private budgetSnapshotSelect() {
     return {
       id: true,
+      departmentId: true,
+      costCenterId: true,
+      projectId: true,
+      expenseTypeCode: true,
+      accountSubjectCode: true,
       totalCents: true,
       inTransitCents: true,
       approvedCents: true,

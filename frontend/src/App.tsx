@@ -52,12 +52,15 @@ type ApiResponse<T> = { success: boolean; data: T };
 type ApiErrorResponse = { success: false; error: { message: string } };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 type Status = 'ACTIVE' | 'DISABLED';
-type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'BUSINESS_APPROVED' | 'FINANCE_APPROVED' | 'FINANCE_REJECTED' | 'APPROVED' | 'REJECTED' | 'VOIDED';
+type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'BUSINESS_APPROVED' | 'FINANCE_APPROVED' | 'FINANCE_REJECTED' | 'PAID' | 'APPROVED' | 'REJECTED' | 'VOIDED';
+type PaymentStatus = 'SUCCESS' | 'FAILED';
+type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CORPORATE_CARD' | 'OTHER';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 type ResourceKey =
   | 'expense-reports'
   | 'approvals'
   | 'finance-reviews'
+  | 'payments'
   | 'expense-policies'
   | 'budgets'
   | 'users'
@@ -127,6 +130,7 @@ interface ExpenseReportRecord {
   budgetOccupations?: BudgetOccupationRecord[];
   financeReviews?: FinanceReviewRecord[];
   financeReviewChecks?: FinanceReviewCheckRecord[];
+  payments?: PaymentRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -146,7 +150,20 @@ interface ExpenseReportItemRecord {
 
 interface ExpenseReportLogRecord {
   id: string;
-  action: 'CREATE' | 'UPDATE' | 'SUBMIT' | 'WITHDRAW' | 'APPROVE' | 'REJECT' | 'FINANCE_APPROVE' | 'FINANCE_RETURN' | 'FINANCE_REJECT' | 'FINANCE_ADJUST' | 'VOID';
+  action:
+    | 'CREATE'
+    | 'UPDATE'
+    | 'SUBMIT'
+    | 'WITHDRAW'
+    | 'APPROVE'
+    | 'REJECT'
+    | 'FINANCE_APPROVE'
+    | 'FINANCE_RETURN'
+    | 'FINANCE_REJECT'
+    | 'FINANCE_ADJUST'
+    | 'PAYMENT_REGISTER'
+    | 'PAYMENT_FAIL'
+    | 'VOID';
   fromStatus?: ExpenseStatus | null;
   toStatus: ExpenseStatus;
   comment?: string | null;
@@ -203,6 +220,25 @@ interface FinanceReviewCheckRecord {
   message: string;
   itemId?: string;
   invoiceId?: string;
+}
+
+interface PaymentRecord {
+  id: string;
+  status: PaymentStatus;
+  method: PaymentMethod;
+  amountCents: number;
+  currency: string;
+  paidAt?: string | null;
+  paymentReference?: string | null;
+  payerAccount?: string | null;
+  payeeAccount?: string | null;
+  failureReason?: string | null;
+  comment?: string | null;
+  fromStatus: ExpenseStatus;
+  toStatus: ExpenseStatus;
+  createdAt: string;
+  batch?: { id: string; batchNo: string; status: 'COMPLETED' | 'PARTIAL_FAILED' } | null;
+  operator: { id: string; name: string };
 }
 
 interface ExpenseAttachmentRecord {
@@ -334,6 +370,13 @@ interface BudgetOccupationRecord {
   budget: { id: string; code: string; name: string };
 }
 
+interface BudgetReconcileResult {
+  reportId: string;
+  reportNo: string;
+  reconciled: Array<{ itemId: string; budgetId: string; amountCents: number }>;
+  skipped: Array<{ itemId: string; reason: string }>;
+}
+
 interface ExpenseFormValues {
   title: string;
   departmentId?: string;
@@ -384,6 +427,17 @@ interface FinanceReviewAdjustmentFormValues {
   comment?: string;
 }
 
+interface PaymentFormValues {
+  amountYuan: string;
+  method?: PaymentMethod;
+  paidAt?: Dayjs;
+  paymentReference?: string;
+  payerAccount?: string;
+  payeeAccount?: string;
+  failureReason?: string;
+  comment?: string;
+}
+
 interface ReferenceData {
   departments: BaseRecord[];
   costCenters: BaseRecord[];
@@ -403,6 +457,7 @@ const resources: Array<{
   { key: 'expense-reports', label: '报销单', icon: <FileTextOutlined />, readPermission: 'exp:report:read', writePermission: 'exp:report:write' },
   { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
   { key: 'finance-reviews', label: '财务审核', icon: <SafetyOutlined />, readPermission: 'exp:finance-review:read', writePermission: 'exp:finance-review:review' },
+  { key: 'payments', label: '出纳付款', icon: <BankOutlined />, readPermission: 'exp:payment:read', writePermission: 'exp:payment:pay' },
   { key: 'expense-policies', label: '费用政策', icon: <ControlOutlined />, readPermission: 'exp:policy:read', writePermission: 'exp:policy:write' },
   { key: 'budgets', label: '预算控制', icon: <BankOutlined />, readPermission: 'exp:budget:read', writePermission: 'exp:budget:write' },
   { key: 'users', label: '用户', icon: <TeamOutlined />, readPermission: 'iam:user:read', writePermission: 'iam:user:write' },
@@ -438,6 +493,7 @@ const expenseStatusOptions: Array<{ label: string; value: ExpenseStatus }> = [
   { label: '业务已通过', value: 'BUSINESS_APPROVED' },
   { label: '财务已通过', value: 'FINANCE_APPROVED' },
   { label: '财务退回', value: 'FINANCE_REJECTED' },
+  { label: '已付款', value: 'PAID' },
   { label: '已通过', value: 'APPROVED' },
   { label: '已驳回', value: 'REJECTED' },
   { label: '已作废', value: 'VOIDED' },
@@ -459,6 +515,13 @@ const policyActionOptions: Array<{ label: string; value: ExpensePolicyAction }> 
 const budgetControlModeOptions: Array<{ label: string; value: BudgetControlMode }> = [
   { label: '超预算提醒', value: 'WARNING' },
   { label: '超预算拦截', value: 'BLOCK' },
+];
+
+const paymentMethodOptions: Array<{ label: string; value: PaymentMethod }> = [
+  { label: '银行转账', value: 'BANK_TRANSFER' },
+  { label: '现金', value: 'CASH' },
+  { label: '公务卡', value: 'CORPORATE_CARD' },
+  { label: '其他', value: 'OTHER' },
 ];
 
 function getToken() {
@@ -507,6 +570,10 @@ export function App() {
   const [financeReviewStatus, setFinanceReviewStatus] = useState<ExpenseStatus | undefined>('BUSINESS_APPROVED');
   const [financeReviewPage, setFinanceReviewPage] = useState(1);
   const [financeReviewPageSize, setFinanceReviewPageSize] = useState(10);
+  const [paymentKeyword, setPaymentKeyword] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState<ExpenseStatus | undefined>('FINANCE_APPROVED');
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [paymentPageSize, setPaymentPageSize] = useState(10);
   const [form] = Form.useForm();
   const [expenseForm] = Form.useForm<ExpenseFormValues>();
   const queryClient = useQueryClient();
@@ -553,6 +620,8 @@ export function App() {
   const canWithdrawExpense = me?.permissions.includes('exp:report:withdraw') ?? false;
   const canApprove = me?.permissions.includes('exp:approval:approve') ?? false;
   const canFinanceReview = me?.permissions.includes('exp:finance-review:review') ?? false;
+  const canPay = me?.permissions.includes('exp:payment:pay') ?? false;
+  const canBudgetWrite = me?.permissions.includes('exp:budget:write') ?? false;
 
   const listQuery = useQuery<PageResult<BaseRecord>>({
     queryKey: [activeResource],
@@ -578,6 +647,7 @@ export function App() {
       activeResource !== 'expense-reports' &&
       activeResource !== 'approvals' &&
       activeResource !== 'finance-reviews' &&
+      activeResource !== 'payments' &&
       activeResource !== 'expense-policies' &&
       activeResource !== 'budgets',
   });
@@ -669,6 +739,18 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'finance-reviews',
+  });
+
+  const paymentsQuery = useQuery<PageResult<ExpenseReportRecord>>({
+    queryKey: ['payments', paymentPage, paymentPageSize, paymentKeyword, paymentStatus],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ExpenseReportRecord>>>('/payments/reports', {
+        headers: authHeaders(),
+        params: { page: paymentPage, pageSize: paymentPageSize, keyword: paymentKeyword || undefined, status: paymentStatus },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'payments',
   });
 
   const expenseTypesQuery = useQuery<PageResult<ExpenseTypeRecord>>({
@@ -841,6 +923,21 @@ export function App() {
     onError: (error) => messageApi.error(apiErrorMessage(error, '财务审核处理失败，请检查单据状态或权限')),
   });
 
+  const handlePaymentMutation = useMutation({
+    mutationFn: async ({ reportId, action, values }: { reportId: string; action: 'register' | 'fail'; values: PaymentFormValues }) =>
+      api.post(`/payments/reports/${reportId}/${action}`, paymentPayload(values), { headers: authHeaders() }),
+    onSuccess: async (_response, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ['payments'] });
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      await queryClient.invalidateQueries({ queryKey: ['budgets'] });
+      if (expenseViewing?.id === variables.reportId) {
+        await refreshExpenseDetail(variables.reportId);
+      }
+      messageApi.success(variables.action === 'register' ? '付款已登记' : '付款失败已记录');
+    },
+    onError: (error) => messageApi.error(apiErrorMessage(error, '付款处理失败，请检查单据状态、金额或权限')),
+  });
+
   const loginMutation = useMutation({
     mutationFn: async (values: { email: string; password: string }) => {
       const response = await api.post<ApiResponse<{ accessToken: string; user: SessionUser }>>('/auth/login', values);
@@ -878,7 +975,12 @@ export function App() {
   }
 
   async function openExpenseDetail(record: ExpenseReportRecord) {
-    const detailUrl = activeResource === 'finance-reviews' ? `/finance-reviews/reports/${record.id}` : `/expense-reports/${record.id}`;
+    const detailUrl =
+      activeResource === 'finance-reviews'
+        ? `/finance-reviews/reports/${record.id}`
+        : activeResource === 'payments'
+          ? `/payments/reports/${record.id}`
+          : `/expense-reports/${record.id}`;
     const response = await api.get<ApiResponse<ExpenseReportRecord>>(detailUrl, { headers: authHeaders() });
     setExpenseViewing(response.data.data);
     setExpenseDetailOpen(true);
@@ -994,11 +1096,13 @@ export function App() {
                   ? '待办、已办和审批记录'
                   : activeResource === 'finance-reviews'
                     ? '会计维度、税额和发票复核'
-                  : activeResource === 'expense-policies'
-                    ? '费用类型、政策规则和超标控制'
-                    : activeResource === 'budgets'
-                      ? '额度、占用和执行情况'
-                      : '身份、权限和主数据'}
+                    : activeResource === 'payments'
+                      ? '待付款、付款登记和付款审计'
+                      : activeResource === 'expense-policies'
+                        ? '费用类型、政策规则和超标控制'
+                        : activeResource === 'budgets'
+                          ? '额度、占用和执行情况'
+                          : '身份、权限和主数据'}
             </Text>
           </div>
           <Select
@@ -1102,6 +1206,31 @@ export function App() {
               }}
               onView={(record) => void openExpenseDetail(record)}
             />
+          ) : activeResource === 'payments' ? (
+            <PaymentsView
+              canPay={canPay}
+              data={paymentsQuery.data}
+              keyword={paymentKeyword}
+              loading={paymentsQuery.isLoading || handlePaymentMutation.isPending}
+              page={paymentPage}
+              pageSize={paymentPageSize}
+              status={paymentStatus}
+              onFail={(record, values) => handlePaymentMutation.mutate({ reportId: record.id, action: 'fail', values })}
+              onPageChange={(page, pageSize) => {
+                setPaymentPage(page);
+                setPaymentPageSize(pageSize);
+              }}
+              onRegister={(record, values) => handlePaymentMutation.mutate({ reportId: record.id, action: 'register', values })}
+              onSearch={(keyword) => {
+                setPaymentKeyword(keyword.trim());
+                setPaymentPage(1);
+              }}
+              onStatusChange={(status) => {
+                setPaymentStatus(status);
+                setPaymentPage(1);
+              }}
+              onView={(record) => void openExpenseDetail(record)}
+            />
           ) : activeResource === 'expense-policies' ? (
             <ExpensePoliciesView
               canWrite={canWrite}
@@ -1170,6 +1299,7 @@ export function App() {
       <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
         {expenseViewing ? (
           <ExpenseReportDetail
+            canBudgetWrite={canBudgetWrite}
             canFinanceReview={canFinanceReview}
             canWrite={canWrite}
             record={expenseViewing}
@@ -1513,6 +1643,15 @@ function BudgetsView({
     onError: (error) => message.error(apiErrorMessage(error, '预算停用失败')),
   });
 
+  const enableBudgetMutation = useMutation({
+    mutationFn: async (id: string) => api.patch(`/budgets/${id}/enable`, {}, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('预算已启用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '预算启用失败')),
+  });
+
   return (
     <>
       <div className="table-toolbar">
@@ -1523,9 +1662,9 @@ function BudgetsView({
       </div>
       <Table
         rowKey="id"
-        loading={loading || disableBudgetMutation.isPending}
+        loading={loading || disableBudgetMutation.isPending || enableBudgetMutation.isPending}
         dataSource={budgets}
-        columns={budgetColumns(canWrite, disableBudgetMutation.mutate)}
+        columns={budgetColumns(canWrite, disableBudgetMutation.mutate, enableBudgetMutation.mutate)}
         pagination={{ pageSize: 10, total: budgets.length }}
         scroll={{ x: 1420 }}
       />
@@ -1546,20 +1685,20 @@ function BudgetsView({
             <DatePicker picker="month" style={{ width: '100%' }} />
           </Form.Item>
           <MoneyField name={['totalYuan']} label="预算总额" />
-          <Form.Item name="expenseTypeCode" label="费用类型" rules={[{ required: true }]}>
-            <Select options={expenseTypeOptionsForBudget.length ? expenseTypeOptionsForBudget : expenseTypeOptions} />
+          <Form.Item name="expenseTypeCode" label="费用类型">
+            <Select allowClear placeholder="留空表示全部费用类型" options={expenseTypeOptionsForBudget.length ? expenseTypeOptionsForBudget : expenseTypeOptions} />
           </Form.Item>
           <Form.Item name="accountSubjectCode" label="会计科目">
-            <Input />
+            <Input placeholder="留空表示全部会计科目" />
           </Form.Item>
           <Form.Item name="departmentId" label="部门 ID">
-            <Input />
+            <Input placeholder="留空表示全部部门" />
           </Form.Item>
           <Form.Item name="costCenterId" label="成本中心 ID">
-            <Input />
+            <Input placeholder="留空表示全部成本中心" />
           </Form.Item>
           <Form.Item name="projectId" label="项目 ID">
-            <Input />
+            <Input placeholder="留空表示全部项目" />
           </Form.Item>
           <Form.Item name="currency" label="币种">
             <Input />
@@ -1762,6 +1901,170 @@ function FinanceReviewsView({
   );
 }
 
+function PaymentsView({
+  canPay,
+  data,
+  keyword,
+  loading,
+  page,
+  pageSize,
+  status,
+  onFail,
+  onPageChange,
+  onRegister,
+  onSearch,
+  onStatusChange,
+  onView,
+}: {
+  canPay: boolean;
+  data?: PageResult<ExpenseReportRecord>;
+  keyword: string;
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  status?: ExpenseStatus;
+  onFail: (record: ExpenseReportRecord, values: PaymentFormValues) => void;
+  onPageChange: (page: number, pageSize: number) => void;
+  onRegister: (record: ExpenseReportRecord, values: PaymentFormValues) => void;
+  onSearch: (keyword: string) => void;
+  onStatusChange: (status?: ExpenseStatus) => void;
+  onView: (record: ExpenseReportRecord) => void;
+}) {
+  const [paymentRecord, setPaymentRecord] = useState<ExpenseReportRecord | null>(null);
+  const [paymentAction, setPaymentAction] = useState<'register' | 'fail'>('register');
+  const [form] = Form.useForm<PaymentFormValues>();
+
+  function openPaymentModal(record: ExpenseReportRecord, action: 'register' | 'fail') {
+    const remainingCents = Math.max(record.reimbursableCents - record.paidAmountCents, 0);
+    setPaymentRecord(record);
+    setPaymentAction(action);
+    form.setFieldsValue({
+      amountYuan: centsToYuan(remainingCents),
+      method: 'BANK_TRANSFER',
+      paidAt: dayjs(),
+    });
+  }
+
+  return (
+    <>
+      <div className="table-toolbar">
+        <Space className="expense-filters">
+          <Input.Search defaultValue={keyword} placeholder="搜索单号或标题" allowClear onSearch={onSearch} />
+          <Select
+            allowClear
+            placeholder="付款状态"
+            value={status}
+            options={expenseStatusOptions.filter((option) => ['FINANCE_APPROVED', 'PAID'].includes(option.value))}
+            onChange={(value) => onStatusChange(value)}
+            className="expense-status-filter"
+          />
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        loading={loading}
+        dataSource={data?.items ?? []}
+        columns={paymentColumns(canPay, (record) => openPaymentModal(record, 'register'), (record) => openPaymentModal(record, 'fail'), onView)}
+        scroll={{ x: 1320 }}
+        pagination={{ current: page, pageSize, total: data?.total, showSizeChanger: true }}
+        onChange={(pagination) => onPageChange(pagination.current ?? 1, pagination.pageSize ?? pageSize)}
+      />
+      <Modal
+        title={paymentAction === 'register' ? '登记付款' : '登记付款失败'}
+        open={Boolean(paymentRecord)}
+        onCancel={() => {
+          setPaymentRecord(null);
+          form.resetFields();
+        }}
+        onOk={() => form.submit()}
+        okButtonProps={{ danger: paymentAction === 'fail' }}
+      >
+        {paymentRecord ? (
+          <Alert
+            className="invoice-check-panel"
+            type={paymentAction === 'register' ? 'info' : 'warning'}
+            showIcon
+            message={`${paymentRecord.reportNo} · 剩余应付 ${formatMoney(paymentRecord.reimbursableCents - paymentRecord.paidAmountCents)}`}
+          />
+        ) : null}
+        <PaymentForm
+          action={paymentAction}
+          form={form}
+          onFinish={(values) => {
+            if (!paymentRecord) {
+              return;
+            }
+            if (paymentAction === 'register') {
+              onRegister(paymentRecord, values);
+            } else {
+              onFail(paymentRecord, values);
+            }
+            setPaymentRecord(null);
+            form.resetFields();
+          }}
+        />
+      </Modal>
+    </>
+  );
+}
+
+function paymentColumns(
+  canPay: boolean,
+  onRegister: (record: ExpenseReportRecord) => void,
+  onFail: (record: ExpenseReportRecord) => void,
+  onView: (record: ExpenseReportRecord) => void,
+): ColumnsType<ExpenseReportRecord> {
+  return [
+    { title: '单号', dataIndex: 'reportNo', width: 170 },
+    { title: '标题', dataIndex: 'title', width: 180 },
+    { title: '状态', dataIndex: 'status', width: 120, render: (status: ExpenseStatus) => <ExpenseStatusTag status={status} /> },
+    { title: '申请人', dataIndex: 'applicant', width: 120, render: (applicant?: ExpenseReportRecord['applicant']) => applicant?.name ?? '-' },
+    { title: '可报销金额', dataIndex: 'reimbursableCents', width: 130, align: 'right', render: formatMoney },
+    { title: '已付金额', dataIndex: 'paidAmountCents', width: 120, align: 'right', render: formatMoney },
+    {
+      title: '剩余应付',
+      width: 120,
+      align: 'right',
+      render: (_: unknown, record) => formatMoney(record.reimbursableCents - record.paidAmountCents),
+    },
+    { title: '成本中心', dataIndex: 'costCenter', width: 150, render: (costCenter?: ExpenseReportRecord['costCenter']) => costCenter?.name ?? '-' },
+    {
+      title: '付款记录',
+      dataIndex: 'payments',
+      width: 170,
+      render: (payments?: PaymentRecord[]) => {
+        const successCount = payments?.filter((payment) => payment.status === 'SUCCESS').length ?? 0;
+        const failedCount = payments?.filter((payment) => payment.status === 'FAILED').length ?? 0;
+        return (
+          <Space>
+            <Tag color={successCount ? 'green' : 'default'}>成功 {successCount}</Tag>
+            <Tag color={failedCount ? 'error' : 'default'}>失败 {failedCount}</Tag>
+          </Space>
+        );
+      },
+    },
+    { title: '提交时间', dataIndex: 'submittedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    {
+      title: '操作',
+      width: 290,
+      fixed: 'right',
+      render: (_: unknown, record) => (
+        <Space>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => onView(record)}>
+            查看
+          </Button>
+          <Button size="small" type="primary" disabled={!canPay || record.status !== 'FINANCE_APPROVED'} onClick={() => onRegister(record)}>
+            付款
+          </Button>
+          <Button size="small" danger disabled={!canPay || record.status !== 'FINANCE_APPROVED'} onClick={() => onFail(record)}>
+            失败
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+}
+
 function financeReviewColumns(
   canReview: boolean,
   onApprove: (record: ExpenseReportRecord) => void,
@@ -1962,7 +2265,7 @@ function policyRuleColumns(
   ];
 }
 
-function budgetColumns(canWrite: boolean, onDisable: (id: string) => void): ColumnsType<BudgetRecord> {
+function budgetColumns(canWrite: boolean, onDisable: (id: string) => void, onEnable: (id: string) => void): ColumnsType<BudgetRecord> {
   return [
     { title: '期间', dataIndex: 'fiscalPeriod', width: 100 },
     { title: '编码', dataIndex: 'code', width: 140 },
@@ -1988,9 +2291,15 @@ function budgetColumns(canWrite: boolean, onDisable: (id: string) => void): Colu
       title: '操作',
       width: 90,
       render: (_: unknown, record) => (
-        <Button danger size="small" disabled={!canWrite || record.status === 'DISABLED'} onClick={() => onDisable(record.id)}>
-          停用
-        </Button>
+        record.status === 'ACTIVE' ? (
+          <Button danger size="small" disabled={!canWrite} onClick={() => onDisable(record.id)}>
+            停用
+          </Button>
+        ) : (
+          <Button size="small" disabled={!canWrite} onClick={() => onEnable(record.id)}>
+            启用
+          </Button>
+        )
       ),
     },
   ];
@@ -2095,18 +2404,21 @@ function ExpenseReportForm({
 }
 
 function ExpenseReportDetail({
+  canBudgetWrite,
   canFinanceReview,
   canWrite,
   record,
   referenceData,
   onChanged,
 }: {
+  canBudgetWrite: boolean;
   canFinanceReview: boolean;
   canWrite: boolean;
   record: ExpenseReportRecord;
   referenceData: ReferenceData;
   onChanged: () => Promise<void>;
 }) {
+  const queryClient = useQueryClient();
   const [attachmentForm] = Form.useForm<AttachmentFormValues>();
   const [invoiceForm] = Form.useForm<InvoiceFormValues>();
   const [financeAdjustmentForm] = Form.useForm<FinanceReviewAdjustmentFormValues>();
@@ -2190,8 +2502,23 @@ function ExpenseReportDetail({
     onError: (error) => message.error(apiErrorMessage(error, '财务修正失败，请检查单据状态、维度或税额')),
   });
 
+  const reconcileBudgetMutation = useMutation({
+    mutationFn: async () => api.post<ApiResponse<BudgetReconcileResult>>(`/budgets/reconcile-paid-report/${record.id}`, {}, { headers: authHeaders() }),
+    onSuccess: async (response) => {
+      await Promise.all([
+        onChanged(),
+        queryClient.invalidateQueries({ queryKey: ['budgets'] }),
+        queryClient.invalidateQueries({ queryKey: ['expense-reports'] }),
+      ]);
+      const result = response.data.data;
+      message.success(`预算补录完成：入账 ${result.reconciled.length} 条，跳过 ${result.skipped.length} 条`);
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '预算补录失败，请确认单据已付款且预算维度已匹配')),
+  });
+
   const editable = canWrite && isEditableExpenseStatus(record.status);
   const financeAdjustable = canFinanceReview && record.status === 'BUSINESS_APPROVED';
+  const canReconcileBudget = canBudgetWrite && record.status === 'PAID';
   const invoiceSummary = buildInvoiceSummary(record.items ?? [], record.invoices ?? []);
   const invoiceItemOptions = (record.items ?? [])
     .filter((item): item is ExpenseReportItemRecord & { id: string } => Boolean(item.id))
@@ -2263,6 +2590,18 @@ function ExpenseReportDetail({
       <PolicyCheckPanel checks={record.policyChecks ?? []} />
 
       <BudgetImpactPanel checks={record.budgetChecks ?? []} occupations={record.budgetOccupations ?? []} />
+      {record.status === 'PAID' ? (
+        <div className="section-toolbar">
+          <Button
+            icon={<BankOutlined />}
+            disabled={!canReconcileBudget}
+            loading={reconcileBudgetMutation.isPending}
+            onClick={() => reconcileBudgetMutation.mutate()}
+          >
+            补录预算实际发生
+          </Button>
+        </div>
+      ) : null}
 
       <Divider orientation="left">报销明细</Divider>
       <Table
@@ -2404,6 +2743,16 @@ function ExpenseReportDetail({
         }}
         pagination={false}
         scroll={{ x: 860 }}
+        size="small"
+      />
+
+      <Divider orientation="left">付款记录</Divider>
+      <Table
+        rowKey="id"
+        dataSource={record.payments ?? []}
+        columns={paymentRecordColumns()}
+        pagination={false}
+        scroll={{ x: 1120 }}
         size="small"
       />
     </div>
@@ -2811,6 +3160,27 @@ function approvalLogColumns(): ColumnsType<ApprovalLogRecord> {
   ];
 }
 
+function paymentRecordColumns(): ColumnsType<PaymentRecord> {
+  return [
+    { title: '时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    { title: '批次', dataIndex: 'batch', width: 170, render: (batch?: PaymentRecord['batch']) => batch?.batchNo ?? '-' },
+    { title: '状态', dataIndex: 'status', width: 100, render: (status: PaymentStatus) => <PaymentStatusTag status={status} /> },
+    { title: '方式', dataIndex: 'method', width: 120, render: paymentMethodName },
+    { title: '金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
+    { title: '付款时间', dataIndex: 'paidAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    { title: '流水号', dataIndex: 'paymentReference', width: 160, render: (value?: string | null) => value ?? '-' },
+    { title: '付款账户', dataIndex: 'payerAccount', width: 160, render: (value?: string | null) => value ?? '-' },
+    { title: '收款账户', dataIndex: 'payeeAccount', width: 160, render: (value?: string | null) => value ?? '-' },
+    { title: '失败原因', dataIndex: 'failureReason', width: 180, render: (value?: string | null) => value ?? '-' },
+    { title: '操作人', dataIndex: 'operator', width: 120, render: (operator: PaymentRecord['operator']) => operator.name },
+    { title: '备注', dataIndex: 'comment', width: 200, render: (comment?: string | null) => comment ?? '-' },
+  ];
+}
+
+function PaymentStatusTag({ status }: { status: PaymentStatus }) {
+  return status === 'SUCCESS' ? <Tag color="green">成功</Tag> : <Tag color="error">失败</Tag>;
+}
+
 function MoneyField({ name, label }: { name: Array<string | number>; label: string }) {
   return (
     <Form.Item
@@ -2913,6 +3283,52 @@ function FinanceAdjustmentForm({
   );
 }
 
+function PaymentForm({
+  action,
+  form,
+  onFinish,
+}: {
+  action: 'register' | 'fail';
+  form: FormInstance<PaymentFormValues>;
+  onFinish: (values: PaymentFormValues) => void;
+}) {
+  return (
+    <Form form={form} layout="vertical" onFinish={onFinish}>
+      <Form.Item name="amountYuan" label="付款金额" rules={[{ required: true }, { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' }]}>
+        <Input suffix="元" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="method" label="付款方式" rules={[{ required: true }]}>
+        <Select options={paymentMethodOptions} />
+      </Form.Item>
+      {action === 'register' ? (
+        <Form.Item name="paidAt" label="付款时间" rules={[{ required: true }]}>
+          <DatePicker showTime className="full-width-control" />
+        </Form.Item>
+      ) : null}
+      <Form.Item name="paymentReference" label="付款流水号">
+        <Input />
+      </Form.Item>
+      {action === 'register' ? (
+        <>
+          <Form.Item name="payerAccount" label="付款账户">
+            <Input />
+          </Form.Item>
+          <Form.Item name="payeeAccount" label="收款账户">
+            <Input />
+          </Form.Item>
+        </>
+      ) : (
+        <Form.Item name="failureReason" label="失败原因" rules={[{ required: true }]}>
+          <Input.TextArea rows={3} />
+        </Form.Item>
+      )}
+      <Form.Item name="comment" label="备注">
+        <Input.TextArea rows={3} />
+      </Form.Item>
+    </Form>
+  );
+}
+
 function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
   const config = {
     DRAFT: { color: 'default', label: '草稿' },
@@ -2920,6 +3336,7 @@ function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
     BUSINESS_APPROVED: { color: 'blue', label: '业务已通过' },
     FINANCE_APPROVED: { color: 'success', label: '财务已通过' },
     FINANCE_REJECTED: { color: 'warning', label: '财务退回' },
+    PAID: { color: 'blue', label: '已付款' },
     APPROVED: { color: 'success', label: '已通过' },
     REJECTED: { color: 'warning', label: '已驳回' },
     VOIDED: { color: 'error', label: '已作废' },
@@ -2988,6 +3405,16 @@ function BudgetOccupationStatusTag({ status }: { status: BudgetOccupationStatus 
   return <Tag color={config.color}>{config.label}</Tag>;
 }
 
+function paymentMethodName(method: PaymentMethod) {
+  const names = {
+    BANK_TRANSFER: '银行转账',
+    CASH: '现金',
+    CORPORATE_CARD: '公务卡',
+    OTHER: '其他',
+  };
+  return names[method];
+}
+
 function policyActionName(action: ExpensePolicyAction) {
   const names = {
     WARNING: '提醒',
@@ -3037,6 +3464,8 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     FINANCE_RETURN: '财务退回补充',
     FINANCE_REJECT: '财务拒绝',
     FINANCE_ADJUST: '财务修正',
+    PAYMENT_REGISTER: '付款登记',
+    PAYMENT_FAIL: '付款失败',
     VOID: '作废',
   };
   return names[action];
@@ -3426,6 +3855,19 @@ function financeAdjustmentPayload(values: FinanceReviewAdjustmentFormValues) {
     projectId: emptyToUndefined(values.projectId),
     taxAmountCents: yuanToCents(values.taxAmountYuan),
     deductibleTaxCents: yuanToCents(values.deductibleTaxYuan),
+    comment: emptyToUndefined(values.comment),
+  };
+}
+
+function paymentPayload(values: PaymentFormValues) {
+  return {
+    amountCents: yuanToCents(values.amountYuan),
+    method: values.method ?? 'BANK_TRANSFER',
+    paidAt: values.paidAt?.toISOString(),
+    paymentReference: emptyToUndefined(values.paymentReference),
+    payerAccount: emptyToUndefined(values.payerAccount),
+    payeeAccount: emptyToUndefined(values.payeeAccount),
+    failureReason: emptyToUndefined(values.failureReason),
     comment: emptyToUndefined(values.comment),
   };
 }

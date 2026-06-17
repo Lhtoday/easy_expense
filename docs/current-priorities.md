@@ -4,6 +4,8 @@ Use this file as the short AI-readable project focus list. Keep it current when 
 
 ## Active Focus
 
+- Phase 8 cashier payment and paid-report budget reconciliation are complete and locally verified as of 2026-06-17.
+- Prepare for Phase 9 voucher draft only when explicitly requested.
 - Stabilize core expense report workflows.
 - Preserve auditability for approval, finance review, payment, voucher, budget, and permission actions.
 - Keep frontend and backend behavior aligned around status transitions and role permissions.
@@ -18,4 +20,3 @@ Use this file as the short AI-readable project focus list. Keep it current when 
 ## Default Next-Step Heuristic
 
 When no task card is specified, inspect `docs/project-status.md` and `docs/development-roadmap.md`, then propose or execute the smallest useful increment that advances the current phase.
-

@@ -843,6 +843,27 @@ export class ExpenseReportsService {
           operator: { select: { id: true, name: true } },
         },
       },
+      payments: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          status: true,
+          method: true,
+          amountCents: true,
+          currency: true,
+          paidAt: true,
+          paymentReference: true,
+          payerAccount: true,
+          payeeAccount: true,
+          failureReason: true,
+          comment: true,
+          fromStatus: true,
+          toStatus: true,
+          createdAt: true,
+          batch: { select: { id: true, batchNo: true, status: true } },
+          operator: { select: { id: true, name: true } },
+        },
+      },
     } satisfies Prisma.ExpenseReportSelect;
   }
 

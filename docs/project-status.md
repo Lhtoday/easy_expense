@@ -197,3 +197,17 @@
 - 完成一个阶段时，将“当前阶段”的状态改为“已完成”，填写完成时间，并更新“阶段历史”。
 - 进入下一阶段前，必须把“当前阶段”更新为下一阶段。
 - 如果阶段范围变化，先更新 `docs/development-roadmap.md`，再同步更新本文档。
+
+## Phase 8 Payment Completion Notes
+
+- Phase: Phase 8 - Cashier Payment
+- Status: completed on 2026-06-17
+- Added `PAID` report status and payment report log actions `PAYMENT_REGISTER` and `PAYMENT_FAIL`.
+- Added `exp_payment_batches` and `exp_payments` through migration `20260616120000_phase8_payment`.
+- Added cashier permissions `exp:payment:read` and `exp:payment:pay`.
+- Added backend `payments` module with payable list, payment detail, successful payment registration, and failed payment registration.
+- Successful payment is allowed only from `FINANCE_APPROVED`, must pay the full remaining payable amount in the MVP, writes payment audit records, moves the report to `PAID`, updates `paidAmountCents`, and transfers approved budget occupation into actual amount.
+- Failed payment writes payment audit records and report status logs, keeps the report in `FINANCE_APPROVED`, and allows retry.
+- Added frontend payment workbench with payable filters, payment/failed-payment dialogs, payment status counts, and payment record display in report detail.
+- Added paid-report budget reconciliation for reports paid before matching budgets existed. The repair is idempotent, writes budget operation logs, supports active wildcard budgets with empty dimensions, and exposes a frontend action in paid report detail.
+- Validation completed: Prisma client generation, local migration deploy/status, backend tests, backend lint/build, frontend lint/build.

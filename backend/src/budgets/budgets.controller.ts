@@ -18,6 +18,16 @@ export class BudgetsController {
     return this.service.create(request.user, dto);
   }
 
+  @Post('reconcile-paid-report/:reportId')
+  reconcilePaidReport(@Req() request: RequestWithUser, @Param('reportId') reportId: string) {
+    return this.service.reconcilePaidReport(request.user, reportId);
+  }
+
+  @Patch(':id/enable')
+  enable(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.service.enable(request.user, id);
+  }
+
   @Patch(':id')
   update(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: UpdateBudgetDto) {
     return this.service.update(request.user, id, dto);

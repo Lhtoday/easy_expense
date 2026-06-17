@@ -9,6 +9,7 @@ import { FinanceReviewsModule } from './finance-reviews/finance-reviews.module';
 import { ExpensePoliciesModule } from './expense-policies/expense-policies.module';
 import { IdentityModule } from './identity/identity.module';
 import { MasterDataModule } from './master-data/master-data.module';
+import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ExpenseReportsModule,
     ApprovalsModule,
     FinanceReviewsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

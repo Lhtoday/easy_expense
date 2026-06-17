@@ -33,3 +33,12 @@ ExpenseFlow budgets distinguish in-transit occupation, approved occupation, and 
 - `BudgetsService.transferActual` is reserved for Phase 8 payment integration, where approved occupation will move to actual amount.
 - Missing matching budget records create a warning trace and do not block submission.
 - Existing matching budgets can either warn or block when available budget is insufficient, according to `control_mode`.
+- Budget dimension matching treats empty budget dimensions as wildcards. For example, an active `2026-06` budget with empty department, cost center, project, expense type, and account subject can match any reimbursement item in that period and currency. When multiple budgets match, the most specific budget wins.
+
+## Phase 8 Implementation Notes
+
+- Payment success calls `BudgetsService.transferActual` inside the same transaction as the payment record and report status update.
+- The transfer moves approved occupation into actual amount only after cashier payment is registered successfully.
+- Failed payment records do not move budget buckets and keep the approved occupation available for a later retry.
+- Phase 8 MVP blocks partial successful payment; this avoids splitting one approved occupation between `APPROVED` and `ACTUAL` before a dedicated partial-payment occupation model is introduced.
+- If a report was paid before a matching budget existed, use `POST /budgets/reconcile-paid-report/:reportId` after creating the budget. The repair action is restricted to `exp:budget:write`, is idempotent per report item, creates `ACTUAL` occupations for matched budgets, writes `ADJUST` budget operation logs, and reports unmatched items without changing report payment status.

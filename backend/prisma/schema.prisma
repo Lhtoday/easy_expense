@@ -45,6 +45,7 @@ enum ExpenseReportStatus {
   BUSINESS_APPROVED
   FINANCE_APPROVED
   FINANCE_REJECTED
+  PAID
   APPROVED
   REJECTED
   VOIDED
@@ -61,7 +62,26 @@ enum ExpenseReportAction {
   FINANCE_RETURN
   FINANCE_REJECT
   FINANCE_ADJUST
+  PAYMENT_REGISTER
+  PAYMENT_FAIL
   VOID
+}
+
+enum PaymentBatchStatus {
+  COMPLETED
+  PARTIAL_FAILED
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CORPORATE_CARD
+  OTHER
 }
 
 enum FinanceReviewAction {
@@ -184,6 +204,8 @@ model User {
   updatedBudgets        Budget[]              @relation("BudgetUpdater")
   operatedBudgetLogs    BudgetOperationLog[]  @relation("BudgetLogOperator")
   operatedFinanceReviews ExpenseFinanceReview[] @relation("FinanceReviewOperator")
+  operatedPaymentBatches ExpensePaymentBatch[] @relation("PaymentBatchOperator")
+  operatedPayments       ExpensePayment[]      @relation("PaymentOperator")
 
   @@map("iam_users")
 }
@@ -371,6 +393,8 @@ model ExpenseReport {
   budgetOccupations     BudgetOccupation[]
   budgetChecks          ExpenseBudgetCheck[]
   financeReviews        ExpenseFinanceReview[]
+  paymentBatches         ExpensePaymentBatch[]
+  payments               ExpensePayment[]
 
   @@index([applicantId, status])
   @@index([departmentId])
@@ -674,6 +698,56 @@ model ExpenseFinanceReview {
   @@index([reportId])
   @@index([operatorId])
   @@map("exp_finance_reviews")
+}
+
+model ExpensePaymentBatch {
+  id              String             @id @default(cuid())
+  batchNo         String             @unique @map("batch_no")
+  name            String?
+  status          PaymentBatchStatus @default(COMPLETED)
+  totalAmountCents Int               @map("total_amount_cents")
+  currency        String             @default("CNY")
+  operatorId      String             @map("operator_id")
+  comment         String?
+  createdAt       DateTime           @default(now()) @map("created_at")
+  completedAt     DateTime?          @map("completed_at")
+  reportId        String?            @map("report_id")
+  report          ExpenseReport?     @relation(fields: [reportId], references: [id])
+  operator        User               @relation("PaymentBatchOperator", fields: [operatorId], references: [id])
+  payments        ExpensePayment[]
+
+  @@index([operatorId])
+  @@index([reportId])
+  @@index([status])
+  @@map("exp_payment_batches")
+}
+
+model ExpensePayment {
+  id                 String              @id @default(cuid())
+  reportId           String              @map("report_id")
+  batchId            String?             @map("batch_id")
+  operatorId         String              @map("operator_id")
+  status             PaymentStatus
+  method             PaymentMethod       @default(BANK_TRANSFER)
+  amountCents        Int                 @map("amount_cents")
+  currency           String              @default("CNY")
+  paidAt             DateTime?           @map("paid_at")
+  paymentReference   String?             @map("payment_reference")
+  payerAccount       String?             @map("payer_account")
+  payeeAccount       String?             @map("payee_account")
+  failureReason      String?             @map("failure_reason")
+  comment            String?
+  fromStatus         ExpenseReportStatus @map("from_status")
+  toStatus           ExpenseReportStatus @map("to_status")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  report             ExpenseReport       @relation(fields: [reportId], references: [id])
+  batch              ExpensePaymentBatch? @relation(fields: [batchId], references: [id])
+  operator           User                @relation("PaymentOperator", fields: [operatorId], references: [id])
+
+  @@index([reportId, status])
+  @@index([batchId])
+  @@index([operatorId])
+  @@map("exp_payments")
 }
 
 model ExpenseAttachment {

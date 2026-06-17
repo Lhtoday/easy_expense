@@ -20,6 +20,8 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'exp:budget:write', name: '维护预算', description: '维护预算额度、控制方式和预算调整入口' },
   { code: 'exp:finance-review:read', name: '查看财务审核', description: '查看待财务审核、已审核报销单和财务审核记录' },
   { code: 'exp:finance-review:review', name: '处理财务审核', description: '执行财务审核通过、退回补充或拒绝' },
+  { code: 'exp:payment:read', name: '查看出纳付款', description: '查看待付款报销单、付款批次和付款记录' },
+  { code: 'exp:payment:pay', name: '登记出纳付款', description: '登记付款成功、付款失败和重新付款' },
 ];
 
 export interface AuthenticatedUser {
