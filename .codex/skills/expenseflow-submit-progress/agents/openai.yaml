@@ -1,0 +1,4 @@
+interface:
+  display_name: "ExpenseFlow Submit Progress"
+  short_description: "Commit, push, and record ExpenseFlow work progress."
+  default_prompt: "Use $expenseflow-submit-progress to commit and push the current ExpenseFlow work, then update progress notes."
