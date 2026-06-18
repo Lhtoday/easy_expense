@@ -1,8 +1,8 @@
-# ExpenseFlow Development Roadmap
+# ExpenseFlow 开发路线图
 
 这份文档定义费用报销项目的推荐开发顺序。原则是先打牢业务闭环和数据一致性，再逐步增强财务自动化、票据智能化和外部系统集成。
 
-## Phase 0: Project Foundation
+## Phase 0：项目基础
 
 目标：先让前后端、数据库、测试和部署骨架跑起来。
 
@@ -20,7 +20,7 @@
 - Prisma migration 可以正常执行
 - Docker Compose 可以启动核心依赖
 
-## Phase 1: Identity And Basic Master Data
+## Phase 1：身份权限与基础主数据
 
 目标：建立费用系统的组织、权限和基础数据底座。
 
@@ -42,7 +42,7 @@
 - 角色可以通过权限弹窗维护授权范围，并支持全部勾选
 - 报销单后续能关联部门、成本中心和项目
 
-## Phase 2: Expense Report Core
+## Phase 2：报销单核心
 
 目标：完成报销单从草稿到提交的核心能力。
 
@@ -61,7 +61,7 @@
 - 报销单状态机开始生效
 - 金额字段不使用浮点数直接计算
 
-## Phase 3: Attachments And Invoice Metadata
+## Phase 3：附件与发票元数据
 
 目标：让报销单具备票据和附件支撑，但先不做复杂 OCR。
 
@@ -79,7 +79,7 @@
 - 报销明细可以关联发票
 - 重复发票会被识别和拦截或提示
 
-## Phase 4: Lightweight Approval Workflow
+## Phase 4：轻量审批流
 
 目标：完成 MVP 阶段的审批闭环。
 
@@ -100,7 +100,7 @@
 - 驳回后员工可以修改再提交
 - 所有审批动作都有日志
 
-## Phase 5: Expense Policy Control
+## Phase 5：费用政策控制
 
 目标：把费用制度从人工判断转成系统规则提示。
 
@@ -119,7 +119,7 @@
 - 超标报销有明确提示
 - 政策结果能影响审批路径或财务审核重点
 
-## Phase 6: Budget Control
+## Phase 6：预算控制
 
 目标：建立报销与预算之间的约束关系。
 
@@ -138,7 +138,7 @@
 - 单据状态变化会正确释放或确认预算
 - 并发提交不会导致预算错误
 
-## Phase 7: Finance Review
+## Phase 7：财务审核
 
 目标：把业务审批和财务审核拆开，形成财务专业控制点。
 
@@ -156,7 +156,7 @@
 - 财务可以调整会计处理维度
 - 财务审核结果进入审计日志
 
-## Phase 8: Payment
+## Phase 8：出纳付款
 
 目标：完成从报销审批到付款登记的闭环。
 
@@ -174,7 +174,7 @@
 - 出纳可以登记付款
 - 报销单可以流转到已付款状态
 
-## Phase 9: Voucher Draft
+## Phase 9：凭证草稿
 
 目标：生成会计凭证草稿，先不直接过账。
 
@@ -193,7 +193,7 @@
 - 财务可以查看和确认凭证明细
 - 凭证生成过程可追溯
 
-## Phase 10: Audit, Reports And Dashboard
+## Phase 10：审计、报表与看板
 
 目标：让财务管理者和审计人员能看清数据。
 
@@ -211,7 +211,7 @@
 - 管理者可以看到费用趋势和预算执行情况
 - 审计人员可以追踪关键操作链路
 
-## Phase 11: Intelligence And Integrations
+## Phase 11：智能化与外部集成
 
 目标：在核心系统稳定后，再做智能化和外部系统对接。
 
@@ -229,7 +229,7 @@
 - 智能能力不破坏原有人工审核流程
 - 外部接口具备签名校验、幂等和失败补偿
 
-## Recommended MVP Boundary
+## 推荐 MVP 边界
 
 第一版 MVP 建议做到 Phase 0 到 Phase 8。
 

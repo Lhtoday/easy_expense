@@ -1,4 +1,4 @@
-# ExpenseFlow Startup Guide
+# ExpenseFlow 启动指南
 
 本文档记录本地启动 ExpenseFlow 项目的操作步骤。日常启动优先走“快速启动”；只有首次启动、Docker 未运行、依赖缺失或数据库结构变更时，才执行对应的准备步骤。
 

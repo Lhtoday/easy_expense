@@ -4,10 +4,10 @@
 
 ## 当前阶段
 
-- 阶段：Phase 7 - 财务审核
+- 阶段：Phase 8 - 出纳付款
 - 状态：已完成
-- 开始时间：2026-06-11
-- 完成时间：2026-06-16
+- 开始时间：2026-06-16
+- 完成时间：2026-06-17
 
 ## Phase 0 完成清单
 
@@ -120,8 +120,8 @@
 
 ## 下一阶段
 
-- 阶段：Phase 8 - 出纳付款
-- 触发条件：Phase 7 财务审核完成后，进入付款登记、付款权限、付款审计日志和预算实际发生金额转入。
+- 阶段：Phase 9 - 凭证草稿
+- 触发条件：仅在明确要求后启动，进入会计科目、科目映射、凭证草稿生成、凭证预览、财务确认和凭证审计追踪。
 
 ## Phase 7 财务审核清单
 
@@ -190,6 +190,7 @@
 | Phase 6 - 预算控制 | 已完成 | 2026-06-08 | 2026-06-08 | 预算主数据、占用/检查/日志模型、提交占用、释放/确认钩子、前端预算页面、详情预算影响、migration、测试、lint 和 build 已验证。 |
 | Phase 6 后验收问题修复 | 已完成 | 2026-06-08 | 2026-06-08 | 主数据选择器、用户角色分配、发票弹窗新增/编辑、重复编码提示、报销草稿维度选择、测试、lint、build 和浏览器 smoke check 已验证。 |
 | Phase 7 - 财务审核 | 已完成 | 2026-06-11 | 2026-06-16 | 财务审核状态、记录、权限、后端模块、前端工作台、业务审批/财务审核拆分、预算确认后移、财务复核阻断规则、会计维度调整、税额修正、发票异常复核增强和浏览器 smoke check 已完成。 |
+| Phase 8 - 出纳付款 | 已完成 | 2026-06-16 | 2026-06-17 | 付款批次、付款记录、出纳权限、付款成功/失败登记、已付款状态、预算实际发生转入、已付款预算修复、测试、lint、build 和 migration 检查已完成。 |
 
 ## 更新规则
 
@@ -198,23 +199,29 @@
 - 进入下一阶段前，必须把“当前阶段”更新为下一阶段。
 - 如果阶段范围变化，先更新 `docs/development-roadmap.md`，再同步更新本文档。
 
-## Phase 8 Payment Completion Notes
+## Phase 8 出纳付款清单
 
-- Phase: Phase 8 - Cashier Payment
-- Status: completed on 2026-06-17
-- Added `PAID` report status and payment report log actions `PAYMENT_REGISTER` and `PAYMENT_FAIL`.
-- Added `exp_payment_batches` and `exp_payments` through migration `20260616120000_phase8_payment`.
-- Added cashier permissions `exp:payment:read` and `exp:payment:pay`.
-- Added backend `payments` module with payable list, payment detail, successful payment registration, and failed payment registration.
-- Successful payment is allowed only from `FINANCE_APPROVED`, must pay the full remaining payable amount in the MVP, writes payment audit records, moves the report to `PAID`, updates `paidAmountCents`, and transfers approved budget occupation into actual amount.
-- Failed payment writes payment audit records and report status logs, keeps the report in `FINANCE_APPROVED`, and allows retry.
-- Added frontend payment workbench with payable filters, payment/failed-payment dialogs, payment status counts, and payment record display in report detail.
-- Added paid-report budget reconciliation for reports paid before matching budgets existed. The repair is idempotent, writes budget operation logs, supports active wildcard budgets with empty dimensions, and exposes a frontend action in paid report detail.
-- Validation completed: Prisma client generation, local migration deploy/status, backend tests, backend lint/build, frontend lint/build.
-- Progress recorded after push: implementation commit `ccd780d` was pushed to `origin/main` on 2026-06-17.
+- [x] 新增 `PAID` 报销单状态和 `PAYMENT_REGISTER`、`PAYMENT_FAIL` 报销单日志动作。
+- [x] 通过 migration `20260616120000_phase8_payment` 新增 `exp_payment_batches` 和 `exp_payments`。
+- [x] 新增出纳权限：`exp:payment:read` 和 `exp:payment:pay`。
+- [x] 新增后端 `payments` 模块，支持待付款列表、付款详情、成功付款登记和失败付款登记。
+- [x] 成功付款只能从 `FINANCE_APPROVED` 发起，MVP 阶段必须支付全部剩余可付金额。
+- [x] 成功付款写入付款审计记录、报销单状态日志，报销单进入 `PAID`，更新 `paidAmountCents`，并将已审批预算占用转为实际发生。
+- [x] 失败付款写入付款审计记录和报销单状态日志，报销单保持 `FINANCE_APPROVED`，允许出纳重试。
+- [x] 新增前端出纳付款工作台，支持待付款筛选、付款/失败付款弹窗、付款状态统计和报销单详情付款记录展示。
+- [x] 新增已付款单据预算修复能力，支持幂等修复、写入预算操作日志、匹配空维度通配预算，并在已付款报销详情提供前端操作入口。
+- [x] 验证完成：Prisma client generation、本地 migration deploy/status、后端测试、后端 lint/build、前端 lint/build。
+- [x] 进度已记录并推送：实现提交 `ccd780d` 已于 2026-06-17 推送到 `origin/main`。
 
-## Workflow Skill Notes
+## 工作流技能记录
 
-- 2026-06-18: Added project skill `expenseflow-submit-progress` for the recurring workflow of committing, pushing, and recording work status after completion or interruption.
-- Validation completed: `quick_validate.py` reported the skill is valid.
-- Progress recorded after push: skill commit `271395f` was pushed to `origin/main` on 2026-06-18.
+- 2026-06-18：新增项目技能 `expenseflow-submit-progress`，用于完成或中断开发后的提交、推送和进度记录流程。
+- 验证完成：`quick_validate.py` 确认该技能有效。
+- 进度已记录并推送：技能提交 `271395f` 已于 2026-06-18 推送到 `origin/main`。
+
+## 文档维护记录
+
+- 文档应按 UTF-8 编码读取和编辑。若 PowerShell 默认输出出现乱码，优先使用 `Get-Content -Encoding UTF8` 验证文件内容，不要直接按乱码结果重写业务事实。
+- 端到端验收剧本见 `docs/e2e-acceptance-script.md`。
+- 2026-06-18：完成文档治理增强。新增端到端验收剧本，补充 Phase 9 凭证草稿、核心流程验收和文档治理任务卡；将 `docs` 中主要说明文档中文化，保留命令、路径、枚举、权限码和 API 路径等机器可识别内容。
+- 2026-06-18：完成 `.codex/skills/expenseflow-*` 技能改造。技能说明改为英文专家库风格，强化触发描述、核心工作流、财务合规 guardrails、验证启发和输出要求；`quick_validate.py` 已确认 8 个 ExpenseFlow 技能有效。

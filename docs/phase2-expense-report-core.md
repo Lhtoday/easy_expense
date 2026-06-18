@@ -1,92 +1,92 @@
-# Phase 2 Expense Report Core
+# Phase 2 报销单核心
 
-## Scope
+## 范围
 
-Phase 2 introduces the first closed loop for expense report drafting and submission.
+Phase 2 引入报销单草稿和提交的第一个闭环。
 
-- Expense report header with business number, applicant, organization dimensions, status, currency, and separated amount fields.
-- Expense report line items with occurrence date, expense type code, accounting subject code, cost dimensions, amount, tax amount, deductible tax, and reimbursable amount.
-- Status log for every core action.
-- Frontend workspace for creating drafts, editing line items, saving drafts, submitting drafts, and voiding drafts.
-- Frontend list filtering by keyword and status with server-side pagination.
-- Frontend detail view for report header, line items, and operation logs.
+- 报销单主表包含业务编号、申请人、组织维度、状态、币种和分离的金额字段。
+- 报销明细包含发生日期、费用类型编码、会计科目编码、成本维度、金额、税额、可抵扣税额和可报销金额。
+- 每个核心动作都有状态日志。
+- 前端工作区支持创建草稿、编辑明细、保存草稿、提交草稿和作废草稿。
+- 前端列表支持按关键字和状态筛选，并使用服务端分页。
+- 前端详情视图展示报销单主信息、明细和操作日志。
 
-## Data Model
+## 数据模型
 
-- `exp_reports`: report header. Amount fields are stored in cents: `amount_cents`, `tax_amount_cents`, `deductible_tax_cents`, `reimbursable_cents`, and `paid_amount_cents`.
-- `exp_report_items`: report line items. Each line stores its own accounting and cost dimensions.
-- `exp_report_logs`: state transition and operation log. It records operator, action, timestamp, previous status, next status, and comment.
+- `exp_reports`：报销单主表。金额字段以分为单位存储：`amount_cents`、`tax_amount_cents`、`deductible_tax_cents`、`reimbursable_cents` 和 `paid_amount_cents`。
+- `exp_report_items`：报销明细表。每行保存自己的会计维度和成本维度。
+- `exp_report_logs`：状态流转和操作日志。记录操作者、动作、时间戳、前状态、后状态和意见。
 
-## Status Flow
+## 状态流转
 
-Current MVP status flow:
+当前 MVP 状态流：
 
-- `DRAFT`: initial state after creating a report.
-- `SUBMITTED`: employee submits a valid draft.
-- `VOIDED`: employee voids a draft.
+- `DRAFT`：创建报销单后的初始状态。
+- `SUBMITTED`：员工提交有效草稿。
+- `VOIDED`：员工作废草稿。
 
-Allowed transitions:
+允许的流转：
 
-- `DRAFT -> DRAFT`: save or update draft.
-- `DRAFT -> SUBMITTED`: submit.
-- `SUBMITTED -> DRAFT`: applicant withdraws a submitted report before it enters approval processing.
-- `DRAFT -> VOIDED`: void.
+- `DRAFT -> DRAFT`：保存或更新草稿。
+- `DRAFT -> SUBMITTED`：提交。
+- `SUBMITTED -> DRAFT`：申请人在报销单进入审批处理前撤回已提交单据。
+- `DRAFT -> VOIDED`：作废。
 
-Editing, submitting, and voiding are blocked once the report leaves `DRAFT`. Withdraw is a separate applicant action and is only available while the report is `SUBMITTED`.
+报销单离开 `DRAFT` 后，编辑、提交和作废都被阻止。撤回是单独的申请人动作，仅在报销单处于 `SUBMITTED` 时可用。
 
-Phase 2 only implements employee/applicant operations. Approval, finance review, and payment actions are intentionally left for later workflow, finance, and payment phases.
+Phase 2 仅实现员工/申请人操作。审批、财务审核和付款动作留给后续工作流、财务和付款阶段。
 
-## Permissions
+## 权限
 
-New permissions:
+新增权限：
 
-- `exp:report:read`: view expense report list and details.
-- `exp:report:write`: create, edit, submit, and void expense reports.
-- `exp:report:withdraw`: withdraw own submitted report before approval processing starts.
+- `exp:report:read`：查看报销单列表和详情。
+- `exp:report:write`：创建、编辑、提交和作废报销单。
+- `exp:report:withdraw`：在审批处理开始前撤回自己已提交的报销单。
 
-The Phase 2 migrations insert these permissions and grant them to the existing `ADMIN` role.
+Phase 2 migration 插入这些权限，并授予现有 `ADMIN` 角色。
 
-## Validation And Accounting Notes
+## 验证与会计说明
 
-- Amounts are stored and calculated in the smallest currency unit. Backend totals are calculated from integer cents.
-- Submit requires at least one line item and a positive reimbursable total.
-- Deductible tax cannot exceed tax amount.
-- Reimbursable amount cannot exceed the original expense amount.
-- Accounting subject is present as `account_subject_code`; detailed subject mapping remains for later accounting policy phases.
+- 金额使用最小货币单位存储和计算。后端汇总基于整数分计算。
+- 提交时至少需要一条明细，且可报销金额合计必须为正数。
+- 可抵扣税额不能超过税额。
+- 可报销金额不能超过原始费用金额。
+- 当前以 `account_subject_code` 保存会计科目；详细科目映射留给后续会计政策阶段。
 
-## Tests
+## 测试
 
-Added backend service tests for:
+已新增后端 service 测试，覆盖：
 
-- Draft creation with fixed-cent totals and status log.
-- Permission enforcement.
-- Invalid tax and reimbursable amount relationships.
-- Submit validation for drafts with no positive reimbursable amount.
+- 创建草稿时按分汇总金额并写入状态日志。
+- 权限控制。
+- 非法税额和可报销金额关系。
+- 无正数可报销金额草稿的提交校验。
 
-Verification run on 2026-06-04:
+2026-06-04 验证：
 
-- `npm.cmd run test`: passed.
-- `npm.cmd run build`: passed.
-- `npm.cmd run lint`: passed.
-- `npm.cmd run db:generate`: passed.
-- `npm.cmd run db:migrate -- --skip-generate`: initially blocked because local PostgreSQL/Docker daemon was not running.
+- `npm.cmd run test`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run lint`：通过。
+- `npm.cmd run db:generate`：通过。
+- `npm.cmd run db:migrate -- --skip-generate`：初次受阻，因为本地 PostgreSQL/Docker daemon 未运行。
 
-Additional verification after list/detail enhancements on 2026-06-04:
+2026-06-04 列表/详情增强后的补充验证：
 
-- `npm.cmd run test`: passed.
-- `npm.cmd run build`: passed.
-- `npm.cmd run lint`: passed.
+- `npm.cmd run test`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run lint`：通过。
 
-Final Phase 2 verification on 2026-06-04:
+2026-06-04 Phase 2 最终验证：
 
-- PostgreSQL became available and `prisma migrate dev --skip-generate` reported the database was in sync.
-- API smoke passed: login, create draft, submit report, amount totals, item count, and log count verified.
-- Browser smoke passed: report list rendered the submitted smoke report and the detail modal rendered report details and status logs without application console errors.
+- PostgreSQL 可用后，`prisma migrate dev --skip-generate` 显示数据库已同步。
+- API smoke 通过：已验证登录、创建草稿、提交报销单、金额合计、明细数量和日志数量。
+- 浏览器 smoke 通过：报销单列表渲染了已提交的 smoke 报销单，详情弹窗渲染了报销单详情和状态日志，应用控制台无错误。
 
-Withdraw enhancement verification on 2026-06-04:
+2026-06-04 撤回增强验证：
 
-- `prisma migrate dev --skip-generate`: applied `20260604120000_phase2_expense_report_withdraw`.
-- `npm.cmd run test`: passed with 9 backend tests.
-- `npm.cmd run build`: passed.
-- `npm.cmd run lint`: passed.
-- API smoke passed: report `EXP202606040002` was created, submitted, withdrawn to `DRAFT`, and logs contained `CREATE,SUBMIT,WITHDRAW`.
+- `prisma migrate dev --skip-generate`：已应用 `20260604120000_phase2_expense_report_withdraw`。
+- `npm.cmd run test`：9 个后端测试通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run lint`：通过。
+- API smoke 通过：报销单 `EXP202606040002` 已创建、提交、撤回到 `DRAFT`，日志包含 `CREATE,SUBMIT,WITHDRAW`。

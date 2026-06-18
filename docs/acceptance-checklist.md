@@ -1,33 +1,32 @@
-# Acceptance Checklist
+# 验收检查清单
 
-Use this checklist when reviewing AI-generated changes or closing a task.
+审查 AI 生成变更或关闭任务时使用本清单。
 
-## General
+## 通用
 
-- The change matches the requested business outcome.
-- The scope does not include unrelated refactors.
-- Naming, structure, and validation follow the existing frontend or backend conventions.
-- Documentation is updated when a core business concept changes.
+- 变更符合请求的业务结果。
+- 范围不包含无关重构。
+- 命名、结构和验证方式遵循现有前端或后端约定。
+- 核心业务概念变化时同步更新文档。
 
-## Finance And Workflow
+## 财务与工作流
 
-- Status transitions are explicit and valid.
-- Approval and finance review remain separate responsibilities.
-- Payment happens only after finance review approval.
-- Budget occupation is created, updated, released, or consumed at the correct lifecycle point.
-- Voucher generation creates drafts only unless finance confirmation is explicitly implemented.
+- 状态流转明确且合法。
+- 业务审批和财务审核保持职责分离。
+- 付款只能发生在财务审核通过之后。
+- 预算占用在正确生命周期节点创建、更新、释放或消耗。
+- 除非明确实现财务确认，否则凭证生成只能生成草稿。
 
-## Audit And Security
+## 审计与安全
 
-- Core actions record actor, action, time, previous state, next state, and comment when applicable.
-- High-risk actions require dedicated permission checks.
-- Data access considers role, data scope, and amount limits.
-- Attachments are not exposed through permanent public links.
+- 核心动作记录操作者、动作、时间、前状态、后状态，以及适用时的意见。
+- 高风险动作需要独立权限检查。
+- 数据访问需要考虑角色、数据范围和金额限制。
+- 附件不得通过永久公开链接暴露。
 
-## Validation
+## 验证
 
-- Run focused tests for the changed area.
-- Run lint/build when shared contracts, types, or routing changed.
-- Verify database migration status when Prisma schema or migrations changed.
-- Mention any commands that could not be run.
-
+- 对变更区域运行聚焦测试。
+- 共享契约、类型或路由变化时运行 lint/build。
+- Prisma schema 或 migration 变化时验证数据库迁移状态。
+- 说明无法运行的命令。

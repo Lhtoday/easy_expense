@@ -1,22 +1,22 @@
-# Current Priorities
+# 当前优先级
 
-Use this file as the short AI-readable project focus list. Keep it current when a phase starts, finishes, or changes direction.
+本文档是便于 AI 快速读取的项目焦点清单。阶段开始、完成或方向变化时应同步更新。
 
-## Active Focus
+## 当前焦点
 
-- Phase 8 cashier payment and paid-report budget reconciliation are complete and locally verified as of 2026-06-17.
-- Prepare for Phase 9 voucher draft only when explicitly requested.
-- Stabilize core expense report workflows.
-- Preserve auditability for approval, finance review, payment, voucher, budget, and permission actions.
-- Keep frontend and backend behavior aligned around status transitions and role permissions.
+- 截至 2026-06-17，Phase 8 出纳付款和已付款单据预算修复已完成并通过本地验证。
+- 只有在明确要求时，才准备进入 Phase 9 凭证草稿。
+- 稳定核心报销单工作流。
+- 保持审批、财务审核、付款、凭证、预算和权限动作的可审计性。
+- 保持前后端围绕状态流转和角色权限的行为一致。
 
-## Do Not Start Without Explicit Request
+## 未明确要求不要启动
 
-- Large workflow engine replacement.
-- External OCR or invoice verification provider integration.
-- Production deployment automation.
-- Major design system redesign.
+- 大型工作流引擎替换。
+- 外部 OCR 或发票验真供应商集成。
+- 生产部署自动化。
+- 大规模设计系统重构。
 
-## Default Next-Step Heuristic
+## 默认下一步判断
 
-When no task card is specified, inspect `docs/project-status.md` and `docs/development-roadmap.md`, then propose or execute the smallest useful increment that advances the current phase.
+未指定任务卡时，先查看 `docs/project-status.md` 和 `docs/development-roadmap.md`，再提出或执行能推进当前阶段的最小有效增量。

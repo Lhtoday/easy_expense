@@ -1,56 +1,56 @@
-# Task Title
+# 任务标题
 
-## Goal
+## 目标
 
-Describe the user-visible or business-visible result.
+描述用户可见或业务可见的结果。
 
-## Business Background
+## 业务背景
 
-Explain why this matters for reimbursement, approval, finance review, payment, voucher, budget, or audit control.
+说明该任务为什么影响报销、审批、财务审核、付款、凭证、预算或审计控制。
 
-## Scope
+## 范围
 
-- In scope item 1
-- In scope item 2
+- 范围内事项 1
+- 范围内事项 2
 
-## Out Of Scope
+## 不包含
 
-- Explicit non-goal 1
-- Explicit non-goal 2
+- 明确不做的事项 1
+- 明确不做的事项 2
 
-## Relevant Files Or Modules
+## 相关文件或模块
 
 - `frontend/src/...`
 - `backend/src/...`
 - `backend/prisma/...`
 
-## Domain Rules
+## 领域规则
 
-- Required status transitions:
-- Required audit behavior:
-- Required permission checks:
-- Budget or accounting impact:
+- 必要状态流转：
+- 必要审计行为：
+- 必要权限检查：
+- 预算或会计影响：
+- 阻断型财务合规场景：
 
-## Acceptance Criteria
+## 验收标准
 
-- Criterion 1
-- Criterion 2
-- Criterion 3
+- 验收项 1
+- 验收项 2
+- 验收项 3
 
-## Validation Commands
+## 验证命令
 
 ```powershell
 npm.cmd run test
 npm.cmd run build
 ```
 
-## Documentation Updates
+## 文档更新
 
 - `docs/project-status.md`
-- Relevant domain document:
+- 相关领域文档：
 
-## Risks
+## 风险
 
-- Risk 1:
-- Risk 2:
-
+- 风险 1：
+- 风险 2：

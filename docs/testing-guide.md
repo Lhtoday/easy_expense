@@ -1,8 +1,8 @@
-# Testing Guide
+# 测试指南
 
-This guide gives AI agents stable validation choices. Prefer the narrowest checks that still cover the risk.
+本文档为 AI 助手提供稳定的验证选择。默认优先选择能覆盖风险的最小检查范围。
 
-## Common Commands
+## 通用命令
 
 ```powershell
 npm.cmd run lint
@@ -10,9 +10,9 @@ npm.cmd run test
 npm.cmd run build
 ```
 
-## Frontend
+## 前端
 
-Use when changing React pages, forms, routing, API clients, state, or UI behavior:
+修改 React 页面、表单、路由、API client、状态或 UI 行为时使用：
 
 ```powershell
 npm.cmd run lint --workspace frontend
@@ -20,9 +20,9 @@ npm.cmd run test --workspace frontend
 npm.cmd run build --workspace frontend
 ```
 
-## Backend
+## 后端
 
-Use when changing NestJS modules, services, controllers, DTOs, permissions, audit behavior, or Prisma access:
+修改 NestJS 模块、service、controller、DTO、权限、审计行为或 Prisma 访问时使用：
 
 ```powershell
 npm.cmd run lint --workspace backend
@@ -32,7 +32,7 @@ npm.cmd run build --workspace backend
 
 ## Prisma
 
-Use when changing schema or migrations:
+修改 schema 或 migration 时使用：
 
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
@@ -40,5 +40,4 @@ npm.cmd run db:generate
 npm.cmd --workspace backend exec prisma migrate status
 ```
 
-Use `prisma migrate dev` only when intentionally creating or adjusting a development migration.
-
+仅在明确创建或调整开发 migration 时使用 `prisma migrate dev`。

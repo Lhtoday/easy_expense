@@ -1,27 +1,37 @@
-# AI Task Cards
+# AI 任务卡
 
-Task cards turn broad project goals into executable AI work. Create one file per meaningful task.
+任务卡用于把宽泛的项目目标拆成 AI 可以执行、验证和交付的具体工作。每个有明确意义的任务应单独创建一个文件。
 
-## Recommended Shape
+## 推荐结构
 
 ```text
-Title
-Goal
-Business Background
-Scope
-Out Of Scope
-Relevant Files Or Modules
-Domain Rules
-Acceptance Criteria
-Validation Commands
-Documentation Updates
-Risks
+标题
+目标
+业务背景
+范围
+不包含
+相关文件或模块
+领域规则
+验收标准
+验证命令
+文档更新
+风险
 ```
 
-## Usage
+## 必要财务上下文
 
-- Keep each task small enough to finish and verify in one focused pass.
-- Prefer concrete acceptance criteria over vague descriptions.
-- Link related domain docs from `docs/domain/`.
-- Move completed task cards to `docs/tasks/done/` only after the result is validated.
+任何涉及报销、审批、财务审核、付款、凭证、预算、发票、附件、权限或审计行为的任务，都必须明确写出：
 
+- 合法状态流转。
+- 必要审计日志。
+- 必要权限检查。
+- 预算或会计影响。
+- 阻断型财务合规场景。
+
+## 使用方式
+
+- 每张任务卡应足够小，能在一次聚焦工作中完成并验证。
+- 优先写具体可验收标准，避免只写笼统描述。
+- 链接 `docs/domain/` 下的相关领域文档。
+- 只有在结果完成并验证后，才把任务卡移动到 `docs/tasks/done/`。
+- 使用 PowerShell 阅读 Markdown 时优先指定 UTF-8 编码，例如 `Get-Content -Encoding UTF8 docs\project-status.md`。

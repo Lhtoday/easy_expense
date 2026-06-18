@@ -1,44 +1,44 @@
-# Budget Occupation Flow
+# 预算占用流程
 
-ExpenseFlow budgets distinguish in-transit occupation, approved occupation, and actual amount.
+ExpenseFlow 预算区分在途占用、已审批占用和实际发生金额。
 
-## Amount Buckets
+## 金额桶
 
-- In-transit occupation: submitted or in-review reimbursement amount.
-- Approved occupation: approved but not yet paid or recognized amount.
-- Actual amount: paid or accounted amount.
+- 在途占用：已提交或审核中的报销金额。
+- 已审批占用：已审批但尚未付款或确认入账的金额。
+- 实际发生：已付款或已入账金额。
 
-## Lifecycle
+## 生命周期
 
-- On submit: create or update in-transit occupation.
-- On business approval: keep occupation in transit unless policy requires approved occupation at this point.
-- On finance approval: move occupation to approved occupation.
-- On payment/accounting confirmation: move approved occupation to actual amount.
-- On reject, withdraw, or void: release occupation.
+- 提交时：创建或更新在途占用。
+- 业务审批通过时：除非政策要求此时确认占用，否则继续保持在途占用。
+- 财务审核通过时：转为已审批占用。
+- 付款或会计确认时：从已审批占用转为实际发生。
+- 驳回、撤回或作废时：释放占用。
 
-## AI Implementation Checks
+## AI 实现检查
 
-- Never update only the reimbursement total and forget budget buckets.
-- Budget release must be idempotent.
-- Budget adjustments must create audit logs.
-- Amount fields should preserve reimbursement amount, invoice amount, tax amount, deductible tax, and paid amount separately.
+- 不要只更新报销总额而忘记预算金额桶。
+- 预算释放必须幂等。
+- 预算调整必须创建审计日志。
+- 金额字段应分别保留报销金额、发票金额、税额、可抵扣税额和已付金额。
 
-## Phase 6 Implementation Notes
+## Phase 6 实现说明
 
-- Budget master data is stored in `bud_budgets`.
-- Budget occupations are stored in `bud_occupations`.
-- Submit-time budget check traces are stored in `bud_checks`.
-- Budget movement audit logs are stored in `bud_operation_logs`.
-- Since Phase 7 starts separating business approval and finance review, business approval keeps occupations in transit and finance approval confirms them into approved occupation.
-- `BudgetsService.transferActual` is reserved for Phase 8 payment integration, where approved occupation will move to actual amount.
-- Missing matching budget records create a warning trace and do not block submission.
-- Existing matching budgets can either warn or block when available budget is insufficient, according to `control_mode`.
-- Budget dimension matching treats empty budget dimensions as wildcards. For example, an active `2026-06` budget with empty department, cost center, project, expense type, and account subject can match any reimbursement item in that period and currency. When multiple budgets match, the most specific budget wins.
+- 预算主数据存储在 `bud_budgets`。
+- 预算占用存储在 `bud_occupations`。
+- 提交时预算检查痕迹存储在 `bud_checks`。
+- 预算变动审计日志存储在 `bud_operation_logs`。
+- 从 Phase 7 开始拆分业务审批和财务审核，因此业务审批通过后占用仍保持在途，财务审核通过后才确认到已审批占用。
+- `BudgetsService.transferActual` 预留给 Phase 8 付款集成，用于将已审批占用转为实际发生。
+- 缺少匹配预算记录时创建提醒痕迹，不阻断提交。
+- 存在匹配预算且可用预算不足时，根据 `control_mode` 进行提醒或阻断。
+- 预算维度匹配将空预算维度视为通配。例如，一个启用的 `2026-06` 预算，如果部门、成本中心、项目、费用类型和会计科目均为空，则可以匹配该期间和币种下的任意报销明细。多个预算匹配时，最具体的预算优先。
 
-## Phase 8 Implementation Notes
+## Phase 8 实现说明
 
-- Payment success calls `BudgetsService.transferActual` inside the same transaction as the payment record and report status update.
-- The transfer moves approved occupation into actual amount only after cashier payment is registered successfully.
-- Failed payment records do not move budget buckets and keep the approved occupation available for a later retry.
-- Phase 8 MVP blocks partial successful payment; this avoids splitting one approved occupation between `APPROVED` and `ACTUAL` before a dedicated partial-payment occupation model is introduced.
-- If a report was paid before a matching budget existed, use `POST /budgets/reconcile-paid-report/:reportId` after creating the budget. The repair action is restricted to `exp:budget:write`, is idempotent per report item, creates `ACTUAL` occupations for matched budgets, writes `ADJUST` budget operation logs, and reports unmatched items without changing report payment status.
+- 付款成功会在与付款记录和报销单状态更新相同的事务中调用 `BudgetsService.transferActual`。
+- 只有出纳成功登记付款后，才将已审批占用转入实际发生。
+- 付款失败记录不移动预算金额桶，并保留已审批占用以便后续重试。
+- Phase 8 MVP 阻断部分成功付款；这样可以避免在专门的部分付款占用模型引入前，将同一笔已审批占用拆分到 `APPROVED` 和 `ACTUAL`。
+- 如果某张报销单在匹配预算存在前已经付款，创建预算后使用 `POST /budgets/reconcile-paid-report/:reportId` 修复。该修复动作仅限 `exp:budget:write`，按报销明细幂等，为匹配预算创建 `ACTUAL` 占用，写入 `ADJUST` 预算操作日志，并报告未匹配明细，不改变报销单付款状态。
