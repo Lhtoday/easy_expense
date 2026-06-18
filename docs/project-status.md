@@ -226,3 +226,10 @@
 - 2026-06-18：完成文档治理增强。新增端到端验收剧本，补充 Phase 9 凭证草稿、核心流程验收和文档治理任务卡；将 `docs` 中主要说明文档中文化，保留命令、路径、枚举、权限码和 API 路径等机器可识别内容。
 - 2026-06-18：完成 `.codex/skills/expenseflow-*` 技能改造。技能说明改为英文专家库风格，强化触发描述、核心工作流、财务合规 guardrails、验证启发和输出要求；`quick_validate.py` 已确认 8 个 ExpenseFlow 技能有效。
 - 2026-06-18：文档治理和技能改造进度已推送。提交 `6148c9a` 已推送到 `origin/main`，分支 `main`。
+
+## Acceptance Stabilization Notes
+
+- 2026-06-18: Fixed six acceptance issues covering repeated expense draft dimensions, expense detail check-panel clarity, compact folder-tab detail layout, and finance over-invoice audit remarks.
+- Added `docs/acceptance-issue-log.md` to track user-reported validation issues and implementation status.
+- Validation completed: backend tests, backend lint, backend build, frontend lint, frontend build, and local frontend browser smoke test.
+- Progress recorded after push: acceptance fix commit `c4abe42` was pushed to `origin/main` on 2026-06-18.
