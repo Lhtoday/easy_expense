@@ -212,3 +212,9 @@
 - Added paid-report budget reconciliation for reports paid before matching budgets existed. The repair is idempotent, writes budget operation logs, supports active wildcard budgets with empty dimensions, and exposes a frontend action in paid report detail.
 - Validation completed: Prisma client generation, local migration deploy/status, backend tests, backend lint/build, frontend lint/build.
 - Progress recorded after push: implementation commit `ccd780d` was pushed to `origin/main` on 2026-06-17.
+
+## Workflow Skill Notes
+
+- 2026-06-18: Added project skill `expenseflow-submit-progress` for the recurring workflow of committing, pushing, and recording work status after completion or interruption.
+- Validation completed: `quick_validate.py` reported the skill is valid.
+- Progress recorded after push: skill commit `271395f` was pushed to `origin/main` on 2026-06-18.
