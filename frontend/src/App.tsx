@@ -35,6 +35,7 @@ import {
   Tag,
   Typography,
   Upload,
+  Checkbox,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -56,6 +57,8 @@ type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'BUSINESS_APPROVED' | 'FINANCE_APPR
 type PaymentStatus = 'SUCCESS' | 'FAILED';
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CORPORATE_CARD' | 'OTHER';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+type DetailSectionKey = 'summary' | 'invoice' | 'policy' | 'budget';
+type DetailSectionStatus = 'PASS' | 'WARNING' | 'BLOCK' | 'PENDING' | 'INFO';
 type ResourceKey =
   | 'expense-reports'
   | 'approvals'
@@ -391,6 +394,7 @@ interface ExpenseFormValues {
     departmentId?: string;
     costCenterId?: string;
     projectId?: string;
+    overrideDimensions?: boolean;
     amountYuan?: string;
     taxAmountYuan?: string;
     deductibleTaxYuan?: string;
@@ -1296,7 +1300,7 @@ export function App() {
       >
         <ExpenseReportForm form={expenseForm} expenseTypeOptions={expenseTypeOptionsForForm} referenceData={referenceData} onFinish={(values) => saveExpenseMutation.mutate(values)} />
       </Modal>
-      <Modal title="报销单详情" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
+      <Modal title="报销单详情" className="expense-detail-modal" open={expenseDetailOpen} onCancel={() => setExpenseDetailOpen(false)} footer={null} width={1180}>
         {expenseViewing ? (
           <ExpenseReportDetail
             canBudgetWrite={canBudgetWrite}
@@ -2380,20 +2384,31 @@ function ExpenseReportForm({
                   <Form.Item name={[field.name, 'description']} label="说明" rules={[{ required: true }]}>
                     <Input />
                   </Form.Item>
-                  <Form.Item name={[field.name, 'departmentId']} label="部门">
-                    <ReferenceSelect records={referenceData.departments} placeholder="默认使用单据部门" />
-                  </Form.Item>
-                  <Form.Item name={[field.name, 'costCenterId']} label="成本中心">
-                    <ReferenceSelect records={referenceData.costCenters} placeholder="默认使用单据成本中心" />
-                  </Form.Item>
-                  <Form.Item name={[field.name, 'projectId']} label="项目">
-                    <ReferenceSelect records={referenceData.projects} placeholder="选择项目" />
-                  </Form.Item>
                   <MoneyField name={[field.name, 'amountYuan']} label="费用金额" />
                   <MoneyField name={[field.name, 'taxAmountYuan']} label="税额" />
                   <MoneyField name={[field.name, 'deductibleTaxYuan']} label="可抵扣税额" />
                   <MoneyField name={[field.name, 'reimbursableYuan']} label="可报销金额" />
                 </div>
+                <Form.Item className="expense-line-override-toggle" name={[field.name, 'overrideDimensions']} valuePropName="checked">
+                  <Checkbox>覆盖单据维度</Checkbox>
+                </Form.Item>
+                <Form.Item noStyle shouldUpdate={(previous, current) => previous.items?.[field.name]?.overrideDimensions !== current.items?.[field.name]?.overrideDimensions}>
+                  {({ getFieldValue }) =>
+                    getFieldValue(['items', field.name, 'overrideDimensions']) ? (
+                      <div className="expense-line-dimension-grid">
+                        <Form.Item name={[field.name, 'departmentId']} label="部门">
+                          <ReferenceSelect records={referenceData.departments} placeholder="默认使用单据部门" />
+                        </Form.Item>
+                        <Form.Item name={[field.name, 'costCenterId']} label="成本中心">
+                          <ReferenceSelect records={referenceData.costCenters} placeholder="默认使用单据成本中心" />
+                        </Form.Item>
+                        <Form.Item name={[field.name, 'projectId']} label="项目">
+                          <ReferenceSelect records={referenceData.projects} placeholder="默认使用单据项目" />
+                        </Form.Item>
+                      </div>
+                    ) : null
+                  }
+                </Form.Item>
               </div>
             ))}
           </div>
@@ -2426,6 +2441,7 @@ function ExpenseReportDetail({
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<ExpenseInvoiceRecord | null>(null);
   const [adjustingItem, setAdjustingItem] = useState<ExpenseReportItemRecord | null>(null);
+  const [activeSection, setActiveSection] = useState<DetailSectionKey>('summary');
 
   const uploadAttachmentMutation = useMutation({
     mutationFn: async (values: AttachmentFormValues) => {
@@ -2520,6 +2536,15 @@ function ExpenseReportDetail({
   const financeAdjustable = canFinanceReview && record.status === 'BUSINESS_APPROVED';
   const canReconcileBudget = canBudgetWrite && record.status === 'PAID';
   const invoiceSummary = buildInvoiceSummary(record.items ?? [], record.invoices ?? []);
+  const invoiceStatus = invoiceSectionStatus(invoiceSummary);
+  const policyStatus = policySectionStatus(record.policyChecks ?? []);
+  const budgetStatus = budgetSectionStatus(record.budgetChecks ?? [], record.budgetOccupations ?? []);
+  const detailSections: Array<{ key: DetailSectionKey; label: string; status: DetailSectionStatus; description: string }> = [
+    { key: 'summary', label: '报销详情', status: 'INFO', description: `${record.reportNo} · ${formatMoney(record.reimbursableCents)}` },
+    { key: 'invoice', label: '发票检查', status: invoiceStatus.status, description: invoiceStatus.description },
+    { key: 'policy', label: '费用政策', status: policyStatus.status, description: policyStatus.description },
+    { key: 'budget', label: '预算影响', status: budgetStatus.status, description: budgetStatus.description },
+  ];
   const invoiceItemOptions = (record.items ?? [])
     .filter((item): item is ExpenseReportItemRecord & { id: string } => Boolean(item.id))
     .map((item, index) => {
@@ -2564,6 +2589,22 @@ function ExpenseReportDetail({
 
   return (
     <div className="expense-detail">
+      <div className="expense-folder-tabs" role="tablist" aria-label="报销单详情分区">
+        {detailSections.map((section) => (
+          <button
+            key={section.key}
+            type="button"
+            role="tab"
+            aria-selected={activeSection === section.key}
+            className={`expense-folder-tab expense-folder-tab-${section.status.toLowerCase()}${activeSection === section.key ? ' active' : ''}`}
+            onClick={() => setActiveSection(section.key)}
+          >
+            <span className="expense-folder-tab-label">{section.label}</span>
+            <span className="expense-folder-tab-status">{detailSectionStatusName(section.status)}</span>
+            <span className="expense-folder-tab-desc">{section.description}</span>
+          </button>
+        ))}
+      </div>
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
         <Descriptions.Item label="单号">{record.reportNo}</Descriptions.Item>
         <Descriptions.Item label="标题">{record.title}</Descriptions.Item>
@@ -2583,25 +2624,32 @@ function ExpenseReportDetail({
         <Descriptions.Item label="实付金额">{formatMoney(record.paidAmountCents)}</Descriptions.Item>
       </Descriptions>
 
-      {record.financeReviewChecks ? <FinanceReviewCheckPanel checks={record.financeReviewChecks} /> : null}
-
-      <InvoiceCheckPanel summary={invoiceSummary} />
-
-      <PolicyCheckPanel checks={record.policyChecks ?? []} />
-
-      <BudgetImpactPanel checks={record.budgetChecks ?? []} occupations={record.budgetOccupations ?? []} />
-      {record.status === 'PAID' ? (
-        <div className="section-toolbar">
-          <Button
-            icon={<BankOutlined />}
-            disabled={!canReconcileBudget}
-            loading={reconcileBudgetMutation.isPending}
-            onClick={() => reconcileBudgetMutation.mutate()}
-          >
-            补录预算实际发生
-          </Button>
-        </div>
-      ) : null}
+      <div className="expense-detail-tab-panel">
+        {activeSection === 'invoice' ? <InvoiceCheckPanel summary={invoiceSummary} /> : null}
+        {activeSection === 'policy' ? (
+          <>
+            {record.financeReviewChecks ? <FinanceReviewCheckPanel checks={record.financeReviewChecks} /> : null}
+            <PolicyCheckPanel checks={record.policyChecks ?? []} />
+          </>
+        ) : null}
+        {activeSection === 'budget' ? (
+          <>
+            <BudgetImpactPanel checks={record.budgetChecks ?? []} occupations={record.budgetOccupations ?? []} />
+            {record.status === 'PAID' ? (
+              <div className="section-toolbar">
+                <Button
+                  icon={<BankOutlined />}
+                  disabled={!canReconcileBudget}
+                  loading={reconcileBudgetMutation.isPending}
+                  onClick={() => reconcileBudgetMutation.mutate()}
+                >
+                  补录预算实际发生
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
 
       <Divider orientation="left">报销明细</Divider>
       <Table
@@ -2661,22 +2709,26 @@ function ExpenseReportDetail({
         size="small"
       />
 
-      <Divider orientation="left">发票</Divider>
-      {editable ? (
-        <div className="section-toolbar">
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openInvoiceModal()}>
-            登记发票
-          </Button>
-        </div>
+      {activeSection === 'invoice' ? (
+        <>
+          <Divider orientation="left">发票</Divider>
+          {editable ? (
+            <div className="section-toolbar">
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => openInvoiceModal()}>
+                登记发票
+              </Button>
+            </div>
+          ) : null}
+          <Table
+            rowKey="id"
+            dataSource={record.invoices ?? []}
+            columns={expenseInvoiceColumns(record.items ?? [], editable, invoiceSummary, (invoice) => openInvoiceModal(invoice), (id) => removeInvoiceMutation.mutate(id))}
+            pagination={false}
+            scroll={{ x: 1180 }}
+            size="small"
+          />
+        </>
       ) : null}
-      <Table
-        rowKey="id"
-        dataSource={record.invoices ?? []}
-        columns={expenseInvoiceColumns(record.items ?? [], editable, invoiceSummary, (invoice) => openInvoiceModal(invoice), (id) => removeInvoiceMutation.mutate(id))}
-        pagination={false}
-        scroll={{ x: 1180 }}
-        size="small"
-      />
       <Modal
         title={editingInvoice ? '编辑发票' : '登记发票'}
         open={invoiceModalOpen}
@@ -2772,6 +2824,64 @@ interface InvoiceSummary {
   uncoveredItems: ExpenseReportItemRecord[];
 }
 
+interface DetailSectionSummary {
+  status: DetailSectionStatus;
+  description: string;
+}
+
+function invoiceSectionStatus(summary: InvoiceSummary): DetailSectionSummary {
+  if (summary.duplicateInvoices.length) {
+    return { status: 'BLOCK', description: `${summary.duplicateInvoices.length} 张重复发票` };
+  }
+  const warningCount = summary.unlinkedInvoices.length + summary.uncoveredItems.length;
+  if (warningCount) {
+    return { status: 'WARNING', description: `${warningCount} 项待处理` };
+  }
+  return { status: 'PASS', description: '当前实时通过' };
+}
+
+function policySectionStatus(checks: ExpensePolicyCheckRecord[]): DetailSectionSummary {
+  if (!checks.length) {
+    return { status: 'PENDING', description: '提交后检查' };
+  }
+  if (checks.some((check) => check.result === 'BLOCK')) {
+    return { status: 'BLOCK', description: `${checks.filter((check) => check.result === 'BLOCK').length} 项阻断` };
+  }
+  if (checks.some((check) => check.result === 'WARNING' || check.result === 'ESCALATE')) {
+    return { status: 'WARNING', description: `${checks.filter((check) => check.result === 'WARNING' || check.result === 'ESCALATE').length} 项提醒` };
+  }
+  return { status: 'PASS', description: lastCheckText(checks) };
+}
+
+function budgetSectionStatus(checks: ExpenseBudgetCheckRecord[], occupations: BudgetOccupationRecord[]): DetailSectionSummary {
+  if (!checks.length && !occupations.length) {
+    return { status: 'PENDING', description: '提交后检查' };
+  }
+  if (checks.some((check) => check.result === 'BLOCK')) {
+    return { status: 'BLOCK', description: `${checks.filter((check) => check.result === 'BLOCK').length} 项阻断` };
+  }
+  if (checks.some((check) => check.result === 'WARNING')) {
+    return { status: 'WARNING', description: `${checks.filter((check) => check.result === 'WARNING').length} 项提醒` };
+  }
+  return { status: 'PASS', description: occupations.length ? `${occupations.length} 条预算记录` : lastCheckText(checks) };
+}
+
+function lastCheckText(checks: Array<{ createdAt: string }>) {
+  const latest = checks.map((check) => dayjs(check.createdAt)).sort((left, right) => right.valueOf() - left.valueOf())[0];
+  return latest?.isValid() ? latest.format('MM-DD HH:mm') : '已检查';
+}
+
+function detailSectionStatusName(status: DetailSectionStatus) {
+  const names = {
+    INFO: '详情',
+    PASS: '通过',
+    WARNING: '提醒',
+    BLOCK: '阻断',
+    PENDING: '待检查',
+  };
+  return names[status];
+}
+
 function FinanceReviewCheckPanel({ checks }: { checks: FinanceReviewCheckRecord[] }) {
   const severity = checks.some((check) => check.severity === 'BLOCK')
     ? 'error'
@@ -2797,18 +2907,21 @@ function FinanceReviewCheckPanel({ checks }: { checks: FinanceReviewCheckRecord[
         </Space>
       }
       description={
-        <Table
-          rowKey={(record) => `${record.code}-${record.itemId ?? record.invoiceId ?? record.message}`}
-          size="small"
-          dataSource={sortFinanceReviewChecks(checks)}
-          columns={financeReviewCheckColumns()}
-          pagination={false}
-          expandable={{
-            defaultExpandAllRows: false,
-            expandedRowRender: (record) => <Text type="secondary">{record.message}</Text>,
-          }}
-          scroll={{ x: 820 }}
-        />
+        <Space direction="vertical" className="detail-check-panel-body">
+          <Text type="secondary">财务审核时实时复核会计维度、税额和票据异常。</Text>
+          <Table
+            rowKey={(record) => `${record.code}-${record.itemId ?? record.invoiceId ?? record.message}`}
+            size="small"
+            dataSource={sortFinanceReviewChecks(checks)}
+            columns={financeReviewCheckColumns()}
+            pagination={false}
+            expandable={{
+              defaultExpandAllRows: false,
+              expandedRowRender: (record) => <Text type="secondary">{record.message}</Text>,
+            }}
+            scroll={{ x: 820 }}
+          />
+        </Space>
       }
     />
   );
@@ -2848,7 +2961,15 @@ function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
   ].filter(Boolean);
 
   if (!issues.length) {
-    return <Alert className="invoice-check-panel" type="success" showIcon message="发票检查通过" description="所有报销明细均已关联发票，且当前没有重复发票。" />;
+    return (
+      <Alert
+        className="invoice-check-panel"
+        type="success"
+        showIcon
+        message="发票检查通过"
+        description="当前详情实时汇总：所有报销明细均已关联发票，且当前没有重复发票。"
+      />
+    );
   }
 
   return (
@@ -2859,6 +2980,7 @@ function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
       message="发票检查待处理"
       description={
         <Space wrap>
+          <Text type="secondary">当前详情实时汇总</Text>
           {issues.map((issue) => (
             <Tag color="warning" key={issue}>
               {issue}
@@ -2872,7 +2994,7 @@ function InvoiceCheckPanel({ summary }: { summary: InvoiceSummary }) {
 
 function PolicyCheckPanel({ checks }: { checks: ExpensePolicyCheckRecord[] }) {
   if (!checks.length) {
-    return <Alert className="invoice-check-panel" type="info" showIcon message="费用政策待检查" description="提交报销单时将自动执行费用政策检查。" />;
+    return <Alert className="invoice-check-panel" type="info" showIcon message="费用政策待检查" description="提交报销单时将自动执行费用政策检查，重新提交后更新结果。" />;
   }
 
   const severity = checks.some((check) => check.result === 'BLOCK')
@@ -2888,14 +3010,17 @@ function PolicyCheckPanel({ checks }: { checks: ExpensePolicyCheckRecord[] }) {
       showIcon
       message="费用政策检查"
       description={
-        <Table
-          rowKey="id"
-          size="small"
-          dataSource={checks}
-          columns={policyCheckColumns()}
-          pagination={false}
-          scroll={{ x: 840 }}
-        />
+        <Space direction="vertical" className="detail-check-panel-body">
+          <Text type="secondary">提交报销单时生成，重新提交后更新。</Text>
+          <Table
+            rowKey="id"
+            size="small"
+            dataSource={checks}
+            columns={policyCheckColumns()}
+            pagination={false}
+            scroll={{ x: 840 }}
+          />
+        </Space>
       }
     />
   );
@@ -2913,7 +3038,7 @@ function policyCheckColumns(): ColumnsType<ExpensePolicyCheckRecord> {
 
 function BudgetImpactPanel({ checks, occupations }: { checks: ExpenseBudgetCheckRecord[]; occupations: BudgetOccupationRecord[] }) {
   if (!checks.length && !occupations.length) {
-    return <Alert className="invoice-check-panel" type="info" showIcon message="预算待检查" description="提交报销单时将自动检查并占用匹配预算。" />;
+    return <Alert className="invoice-check-panel" type="info" showIcon message="预算待检查" description="提交报销单时将自动检查并占用匹配预算，审批、付款或补录后更新占用状态。" />;
   }
 
   const severity = checks.some((check) => check.result === 'BLOCK')
@@ -2930,6 +3055,7 @@ function BudgetImpactPanel({ checks, occupations }: { checks: ExpenseBudgetCheck
       message="预算影响"
       description={
         <Space direction="vertical" className="budget-impact-panel">
+          <Text type="secondary">提交时检查并占用预算，审批、付款或补录后更新占用状态。</Text>
           {checks.length ? (
             <Table rowKey="id" size="small" dataSource={checks} columns={budgetCheckColumns()} pagination={false} scroll={{ x: 760 }} />
           ) : null}
@@ -3819,9 +3945,9 @@ function expenseFormPayload(values: ExpenseFormValues) {
       expenseTypeCode: item.expenseTypeCode,
       accountSubjectCode: emptyToUndefined(item.accountSubjectCode),
       description: item.description,
-      departmentId: emptyToUndefined(item.departmentId),
-      costCenterId: emptyToUndefined(item.costCenterId),
-      projectId: emptyToUndefined(item.projectId),
+      departmentId: item.overrideDimensions ? emptyToUndefined(item.departmentId) : undefined,
+      costCenterId: item.overrideDimensions ? emptyToUndefined(item.costCenterId) : undefined,
+      projectId: item.overrideDimensions ? emptyToUndefined(item.projectId) : undefined,
       amountCents: yuanToCents(item.amountYuan),
       taxAmountCents: yuanToCents(item.taxAmountYuan),
       deductibleTaxCents: yuanToCents(item.deductibleTaxYuan),
@@ -3924,6 +4050,7 @@ function expenseToFormValues(record: ExpenseReportRecord): ExpenseFormValues {
           departmentId: item.departmentId ?? undefined,
           costCenterId: item.costCenterId ?? undefined,
           projectId: item.projectId ?? undefined,
+          overrideDimensions: Boolean(item.departmentId || item.costCenterId || item.projectId),
           amountYuan: centsToYuan(item.amountCents),
           taxAmountYuan: centsToYuan(item.taxAmountCents),
           deductibleTaxYuan: centsToYuan(item.deductibleTaxCents),
@@ -3937,6 +4064,7 @@ function emptyExpenseItem() {
   return {
     occurredAt: dayjs(),
     expenseTypeCode: 'TRAVEL',
+    overrideDimensions: false,
     amountYuan: '0.00',
     taxAmountYuan: '0.00',
     deductibleTaxYuan: '0.00',

@@ -218,6 +218,7 @@ export class FinanceReviewsService {
       if (action === FinanceReviewAction.APPROVE && blockingChecks.length) {
         throw new BadRequestException(`Finance review has blocking issues: ${blockingChecks.map((check) => check.message).join('; ')}`);
       }
+      const effectiveComment = action === FinanceReviewAction.APPROVE ? this.financeReviewComment(comment, report) : comment;
 
       await tx.expenseFinanceReview.create({
         data: {
@@ -226,7 +227,7 @@ export class FinanceReviewsService {
           action,
           fromStatus: report.status,
           toStatus,
-          comment,
+          comment: effectiveComment,
         },
       });
       await tx.expenseReportLog.create({
@@ -236,14 +237,14 @@ export class FinanceReviewsService {
           action: reportAction,
           fromStatus: report.status,
           toStatus,
-          comment,
+          comment: effectiveComment,
         },
       });
 
       if (action === FinanceReviewAction.APPROVE) {
         await this.budgets.confirmApproved(tx, reportId, user.id);
       } else {
-        await this.budgets.releaseReport(tx, reportId, user.id, comment ?? 'Finance review returned or rejected the report.');
+        await this.budgets.releaseReport(tx, reportId, user.id, effectiveComment ?? 'Finance review returned or rejected the report.');
       }
 
       return tx.expenseReport.update({
@@ -289,6 +290,48 @@ export class FinanceReviewsService {
       next.deductibleTaxCents !== undefined && `deductibleTaxCents: ${previous.deductibleTaxCents} -> ${next.deductibleTaxCents}`,
     ].filter(Boolean);
     return `Finance review adjustment. ${changes.join('; ')}`;
+  }
+
+  private financeReviewComment(
+    comment: string | undefined,
+    report: {
+      items?: unknown[];
+      invoices?: unknown[];
+    },
+  ) {
+    const overInvoiceRemarks = this.overInvoiceRemarks(report);
+    if (!overInvoiceRemarks.length) {
+      return comment;
+    }
+    return [comment?.trim(), ...overInvoiceRemarks].filter(Boolean).join('\n');
+  }
+
+  private overInvoiceRemarks(report: { items?: unknown[]; invoices?: unknown[] }) {
+    const items = (report.items ?? []) as Array<{ id: string; description: string; amountCents: number; reimbursableCents: number }>;
+    const invoices = (report.invoices ?? []) as Array<{ itemId?: string | null; duplicateStatus: 'UNIQUE' | 'DUPLICATE'; totalAmountCents: number }>;
+    const invoiceTotalByItem = new Map<string, number>();
+    invoices.forEach((invoice) => {
+      if (!invoice.itemId || invoice.duplicateStatus === 'DUPLICATE') {
+        return;
+      }
+      invoiceTotalByItem.set(invoice.itemId, (invoiceTotalByItem.get(invoice.itemId) ?? 0) + invoice.totalAmountCents);
+    });
+
+    return items
+      .map((item) => {
+        const invoiceTotal = invoiceTotalByItem.get(item.id) ?? 0;
+        if (invoiceTotal <= item.amountCents) {
+          return '';
+        }
+        const cappedAmount = Math.min(item.amountCents, item.reimbursableCents);
+        const overAmount = invoiceTotal - item.amountCents;
+        return `系统提示：${item.description} 关联发票价税合计 ${this.formatMoney(invoiceTotal)}大于费用金额 ${this.formatMoney(item.amountCents)}。本次仅按费用金额/可报销金额 ${this.formatMoney(cappedAmount)}报销、付款、占用预算和入账，超出 ${this.formatMoney(overAmount)}不作为本次报销依据。`;
+      })
+      .filter(Boolean);
+  }
+
+  private formatMoney(cents: number) {
+    return `${(cents / 100).toFixed(2)} 元`;
   }
 
   private reportSelect() {

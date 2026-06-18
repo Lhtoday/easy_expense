@@ -50,3 +50,6 @@
 - 失败付款记录 `exp_payments`，创建失败批次，向报销单状态日志写入 `PAYMENT_FAIL`，并保持报销单为 `FINANCE_APPROVED`，让出纳可以重试。
 - Phase 8 MVP 要求成功付款金额等于剩余可付金额。付款表保留金额/状态字段以便未来支持部分付款，但在实现预算占用拆分前，故意阻断部分成功付款。
 - 付款动作需要 `exp:payment:pay`；查看付款工作台需要 `exp:payment:read`。
+## Acceptance Fix Notes
+
+- If linked invoice total is greater than expense amount, finance review keeps the issue as a warning. On finance approval, the system appends an automatic audit remark explaining that reimbursement, payment, budget occupation, and accounting expense are capped at the approved expense amount; the excess invoice amount is not used as reimbursement basis.

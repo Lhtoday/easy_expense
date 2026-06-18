@@ -228,13 +228,115 @@ body {
   margin-top: 10px;
 }
 
+.expense-line-override-toggle {
+  margin-bottom: 8px;
+}
+
+.expense-line-dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 12px;
+  padding: 10px 12px 0;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
 .expense-detail {
   display: grid;
-  gap: 4px;
+  gap: 12px;
+}
+
+.expense-detail-modal .ant-modal-body {
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+}
+
+.expense-folder-tabs {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  padding: 0 0 0 8px;
+  border-bottom: 1px solid #d9dee8;
+}
+
+.expense-folder-tab {
+  display: grid;
+  min-width: 154px;
+  min-height: 58px;
+  padding: 8px 12px 7px;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+  background: #f8fafc;
+  border: 1px solid #d9dee8;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  transform: translateY(1px);
+}
+
+.expense-folder-tab.active {
+  min-height: 66px;
+  background: #ffffff;
+  transform: translateY(1px);
+  box-shadow: 0 -1px 0 #ffffff inset;
+}
+
+.expense-folder-tab-label {
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.expense-folder-tab-status,
+.expense-folder-tab-desc {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.expense-folder-tab-desc {
+  color: #6b7280;
+}
+
+.expense-folder-tab-info {
+  border-top: 4px solid #1677ff;
+}
+
+.expense-folder-tab-pass {
+  border-top: 4px solid #52c41a;
+}
+
+.expense-folder-tab-warning,
+.expense-folder-tab-pending {
+  border-top: 4px solid #faad14;
+}
+
+.expense-folder-tab-block {
+  border-top: 4px solid #ff4d4f;
+}
+
+.expense-folder-tab-pass .expense-folder-tab-status {
+  color: #237804;
+}
+
+.expense-folder-tab-warning .expense-folder-tab-status,
+.expense-folder-tab-pending .expense-folder-tab-status {
+  color: #ad6800;
+}
+
+.expense-folder-tab-block .expense-folder-tab-status {
+  color: #a8071a;
+}
+
+.expense-detail-tab-panel {
+  min-height: 0;
+}
+
+.detail-check-panel-body {
+  width: 100%;
 }
 
 .invoice-check-panel {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .section-toolbar {
@@ -334,9 +436,19 @@ body {
 
   .expense-form-grid,
   .expense-line-grid,
+  .expense-line-dimension-grid,
   .expense-sub-form,
   .invoice-sub-form,
   .policy-grid {
     grid-template-columns: 1fr;
+  }
+
+  .expense-folder-tabs {
+    align-items: stretch;
+    overflow-x: auto;
+  }
+
+  .expense-folder-tab {
+    min-width: 132px;
   }
 }

@@ -109,6 +109,83 @@ describe('FinanceReviewsService', () => {
     expect(budgets.releaseReport).not.toHaveBeenCalled();
   });
 
+  it('appends an automatic finance remark when invoice total exceeds expense amount', async () => {
+    const report = {
+      id: 'report_1',
+      status: ExpenseReportStatus.BUSINESS_APPROVED,
+      amountCents: 8000,
+      taxAmountCents: 0,
+      deductibleTaxCents: 0,
+      items: [
+        {
+          id: 'item_1',
+          description: 'Taxi',
+          accountSubjectCode: '660201',
+          costCenterId: 'cc_1',
+          projectId: 'project_1',
+          amountCents: 8000,
+          taxAmountCents: 0,
+          deductibleTaxCents: 0,
+          reimbursableCents: 8000,
+        },
+      ],
+      invoices: [
+        {
+          id: 'invoice_1',
+          itemId: 'item_1',
+          invoiceNo: 'INV001',
+          duplicateStatus: 'UNIQUE',
+          amountCents: 3000,
+          taxAmountCents: 0,
+          totalAmountCents: 3000,
+          deductibleTaxCents: 0,
+        },
+        {
+          id: 'invoice_2',
+          itemId: 'item_1',
+          invoiceNo: 'INV002',
+          duplicateStatus: 'UNIQUE',
+          amountCents: 7000,
+          taxAmountCents: 0,
+          totalAmountCents: 7000,
+          deductibleTaxCents: 0,
+        },
+      ],
+    };
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue(report),
+        update: vi.fn().mockResolvedValue({ ...report, status: ExpenseReportStatus.FINANCE_APPROVED }),
+      },
+      expenseFinanceReview: { create: vi.fn().mockResolvedValue({ id: 'review_1' }) },
+      expenseReportLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const budgets = { confirmApproved: vi.fn().mockResolvedValue(undefined), releaseReport: vi.fn().mockResolvedValue(undefined) };
+    const service = new FinanceReviewsService(prisma as never, budgets as never);
+
+    await expect(service.approve(user, 'report_1', '人工确认可报销 80 元')).resolves.toEqual(
+      expect.objectContaining({
+        status: ExpenseReportStatus.FINANCE_APPROVED,
+        financeReviewChecks: expect.arrayContaining([expect.objectContaining({ code: 'ITEM_INVOICE_AMOUNT_OVER', severity: 'WARNING' })]),
+      }),
+    );
+    expect(tx.expenseFinanceReview.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          comment: expect.stringContaining('人工确认可报销 80 元\n系统提示：Taxi 关联发票价税合计 100.00 元大于费用金额 80.00 元'),
+        }),
+      }),
+    );
+    expect(tx.expenseReportLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          comment: expect.stringContaining('超出 20.00 元不作为本次报销依据'),
+        }),
+      }),
+    );
+  });
+
   it('blocks finance approval when accounting dimensions have blocking issues', async () => {
     const tx = {
       expenseReport: {
