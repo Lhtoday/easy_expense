@@ -97,3 +97,4 @@ npm.cmd run build --workspace frontend
 - 凭证生成、确认、科目和映射维护已写入系统审计日志，并保留报销单状态日志和凭证领域日志。
 - 前端已先补充新报销状态的类型、筛选项和状态标签，完整凭证工作台/详情入口可作为下一步 UI 增量。
 - 验证已通过：`npm.cmd run db:generate`、`npm.cmd run test --workspace backend`、`npm.cmd run lint`、`npm.cmd run build`、本地 `prisma migrate deploy`。
+- 本步骤已提交并推送：`434b0ca feat: start phase9 voucher drafts`，分支 `main`，远端 `origin/main`。
