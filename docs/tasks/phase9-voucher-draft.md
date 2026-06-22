@@ -83,3 +83,17 @@ npm.cmd run build --workspace frontend
 - 如果页面文案和权限边界不清晰，凭证确认可能被误解为自动过账。
 - 现有 `APPROVED` 状态偏历史遗留，不能在未评估状态机影响前复用。
 - 如果需要补生成历史已付款单据的凭证，补生成过程必须幂等且可审计。
+
+## 2026-06-22 开发记录
+
+- Phase 9 后续开发采用小步闭环：每完成一个可验收步骤，必须更新本任务卡/项目状态，运行相关验证，然后立即提交并推送到 `origin/main`。
+- 已新增会计科目主数据 `gl_account_subjects`、科目映射 `gl_account_mappings`、凭证主表 `gl_vouchers`、凭证明细 `gl_voucher_lines` 和凭证日志 `gl_voucher_logs`。
+- 已新增 `VOUCHER_DRAFTED`、`VOUCHER_CONFIRMED` 报销单状态，以及 `VOUCHER_DRAFT`、`VOUCHER_CONFIRM` 状态日志动作。
+- 已新增会计科目和凭证权限：`gl:account:read`、`gl:account:write`、`gl:voucher:read`、`gl:voucher:generate`、`gl:voucher:confirm`。
+- 已新增后端 `vouchers` 模块，支持科目维护、映射维护、凭证预览、凭证草稿生成、凭证确认。
+- 生成规则已覆盖报销确认凭证和付款凭证：费用/进项税借方、员工往来贷方；付款时员工往来借方、银行付款科目贷方。
+- 凭证生成仅允许 `PAID` 且有成功付款记录的报销单；重复生成会被阻断。
+- 凭证确认会检查借贷平衡；最后一张草稿确认后，报销单流转到 `VOUCHER_CONFIRMED`。
+- 凭证生成、确认、科目和映射维护已写入系统审计日志，并保留报销单状态日志和凭证领域日志。
+- 前端已先补充新报销状态的类型、筛选项和状态标签，完整凭证工作台/详情入口可作为下一步 UI 增量。
+- 验证已通过：`npm.cmd run db:generate`、`npm.cmd run test --workspace backend`、`npm.cmd run lint`、`npm.cmd run build`、本地 `prisma migrate deploy`。

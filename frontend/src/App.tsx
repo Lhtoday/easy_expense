@@ -53,7 +53,18 @@ type ApiResponse<T> = { success: boolean; data: T };
 type ApiErrorResponse = { success: false; error: { message: string } };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 type Status = 'ACTIVE' | 'DISABLED';
-type ExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'BUSINESS_APPROVED' | 'FINANCE_APPROVED' | 'FINANCE_REJECTED' | 'PAID' | 'APPROVED' | 'REJECTED' | 'VOIDED';
+type ExpenseStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'BUSINESS_APPROVED'
+  | 'FINANCE_APPROVED'
+  | 'FINANCE_REJECTED'
+  | 'PAID'
+  | 'VOUCHER_DRAFTED'
+  | 'VOUCHER_CONFIRMED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'VOIDED';
 type PaymentStatus = 'SUCCESS' | 'FAILED';
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CORPORATE_CARD' | 'OTHER';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
@@ -498,6 +509,8 @@ const expenseStatusOptions: Array<{ label: string; value: ExpenseStatus }> = [
   { label: '财务已通过', value: 'FINANCE_APPROVED' },
   { label: '财务退回', value: 'FINANCE_REJECTED' },
   { label: '已付款', value: 'PAID' },
+  { label: '凭证草稿', value: 'VOUCHER_DRAFTED' },
+  { label: '凭证已确认', value: 'VOUCHER_CONFIRMED' },
   { label: '已通过', value: 'APPROVED' },
   { label: '已驳回', value: 'REJECTED' },
   { label: '已作废', value: 'VOIDED' },
@@ -3463,6 +3476,8 @@ function ExpenseStatusTag({ status }: { status: ExpenseStatus }) {
     FINANCE_APPROVED: { color: 'success', label: '财务已通过' },
     FINANCE_REJECTED: { color: 'warning', label: '财务退回' },
     PAID: { color: 'blue', label: '已付款' },
+    VOUCHER_DRAFTED: { color: 'purple', label: '凭证草稿' },
+    VOUCHER_CONFIRMED: { color: 'success', label: '凭证已确认' },
     APPROVED: { color: 'success', label: '已通过' },
     REJECTED: { color: 'warning', label: '已驳回' },
     VOIDED: { color: 'error', label: '已作废' },

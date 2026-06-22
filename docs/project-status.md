@@ -4,10 +4,10 @@
 
 ## 当前阶段
 
-- 阶段：Phase 8 - 出纳付款
-- 状态：已完成
-- 开始时间：2026-06-16
-- 完成时间：2026-06-17
+- 阶段：Phase 9 - 凭证草稿
+- 状态：进行中
+- 开始时间：2026-06-22
+- 完成时间：待定
 
 ## Phase 0 完成清单
 
@@ -235,3 +235,11 @@
 - Added `docs/acceptance-issue-log.md` to track user-reported validation issues and implementation status.
 - Validation completed: backend tests, backend lint, backend build, frontend lint, frontend build, and local frontend browser smoke test.
 - Progress recorded after push: acceptance fix commit `c4abe42` was pushed to `origin/main` on 2026-06-18.
+
+## Phase 9 凭证草稿进展
+
+- 2026-06-22：Phase 9 已启动，完成后端首批凭证草稿能力。新增 `gl_account_subjects`、`gl_account_mappings`、`gl_vouchers`、`gl_voucher_lines`、`gl_voucher_logs`，支持会计科目、费用类型/员工往来/进项税/银行付款科目映射、凭证预览、生成和确认。
+- 已新增 `VOUCHER_DRAFTED`、`VOUCHER_CONFIRMED` 状态，凭证生成后从 `PAID` 流转到 `VOUCHER_DRAFTED`，全部草稿确认后流转到 `VOUCHER_CONFIRMED`。
+- 已新增 `gl:account:*` 和 `gl:voucher:*` 权限；凭证生成、确认、科目和映射维护均写入系统审计日志。
+- 已补充后端单测，验证状态门槛、借贷平衡、凭证确认和审计动作；前端已识别新状态，完整凭证工作台和报销详情入口待下一步开发。
+- 验证完成：Prisma generate、本地 migration deploy、后端测试、全量 lint、全量 build。

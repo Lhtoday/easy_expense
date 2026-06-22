@@ -46,6 +46,8 @@ enum ExpenseReportStatus {
   FINANCE_APPROVED
   FINANCE_REJECTED
   PAID
+  VOUCHER_DRAFTED
+  VOUCHER_CONFIRMED
   APPROVED
   REJECTED
   VOIDED
@@ -64,6 +66,8 @@ enum ExpenseReportAction {
   FINANCE_ADJUST
   PAYMENT_REGISTER
   PAYMENT_FAIL
+  VOUCHER_DRAFT
+  VOUCHER_CONFIRM
   VOID
 }
 
@@ -205,54 +209,116 @@ enum SystemAuditAction {
   POLICY_RULE_CREATE
   POLICY_RULE_UPDATE
   POLICY_RULE_DISABLE
+  ACCOUNT_SUBJECT_CREATE
+  ACCOUNT_SUBJECT_UPDATE
+  ACCOUNT_SUBJECT_DISABLE
+  ACCOUNT_MAPPING_CREATE
+  ACCOUNT_MAPPING_UPDATE
+  ACCOUNT_MAPPING_DISABLE
   VOUCHER_DRAFT_GENERATE
   VOUCHER_REGENERATE
   VOUCHER_CONFIRM
   VOUCHER_VOID
 }
 
+enum GlStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum GlAccountCategory {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  TAX
+}
+
+enum GlNormalBalance {
+  DEBIT
+  CREDIT
+}
+
+enum GlAccountMappingPurpose {
+  EXPENSE_TYPE
+  EMPLOYEE_PAYABLE
+  INPUT_TAX
+  BANK_PAYMENT
+}
+
+enum GlVoucherType {
+  EXPENSE_ACCRUAL
+  PAYMENT
+}
+
+enum GlVoucherStatus {
+  DRAFT
+  CONFIRMED
+  VOIDED
+}
+
+enum GlVoucherLineDirection {
+  DEBIT
+  CREDIT
+}
+
+enum GlVoucherAction {
+  GENERATE
+  CONFIRM
+  VOID
+}
+
 model User {
-  id             String             @id @default(cuid())
-  employeeNo     String             @unique @map("employee_no")
-  email          String             @unique
-  name           String
-  passwordHash   String             @map("password_hash")
-  status         UserStatus         @default(ACTIVE)
-  departmentId   String?            @map("department_id")
-  costCenterId   String?            @map("cost_center_id")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
-  deletedAt      DateTime?          @map("deleted_at")
-  department     Department?        @relation(fields: [departmentId], references: [id])
-  costCenter     CostCenter?        @relation(fields: [costCenterId], references: [id])
-  roles          UserRole[]
-  createdReports ExpenseReport[]    @relation("ExpenseReportApplicant")
-  updatedReports ExpenseReport[]    @relation("ExpenseReportUpdater")
-  reportLogs     ExpenseReportLog[]
-  uploadedAttachments ExpenseAttachment[] @relation("ExpenseAttachmentUploader")
-  invoiceCreatedBy ExpenseInvoice[]       @relation("ExpenseInvoiceCreator")
-  assignedApprovalTasks ExpenseApprovalTask[] @relation("ApprovalTaskAssignee")
-  operatedApprovalLogs  ExpenseApprovalLog[]  @relation("ApprovalLogOperator")
-  createdBudgets        Budget[]              @relation("BudgetCreator")
-  updatedBudgets        Budget[]              @relation("BudgetUpdater")
-  operatedBudgetLogs    BudgetOperationLog[]  @relation("BudgetLogOperator")
+  id                     String                 @id @default(cuid())
+  employeeNo             String                 @unique @map("employee_no")
+  email                  String                 @unique
+  name                   String
+  passwordHash           String                 @map("password_hash")
+  status                 UserStatus             @default(ACTIVE)
+  departmentId           String?                @map("department_id")
+  costCenterId           String?                @map("cost_center_id")
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
+  deletedAt              DateTime?              @map("deleted_at")
+  department             Department?            @relation(fields: [departmentId], references: [id])
+  costCenter             CostCenter?            @relation(fields: [costCenterId], references: [id])
+  roles                  UserRole[]
+  createdReports         ExpenseReport[]        @relation("ExpenseReportApplicant")
+  updatedReports         ExpenseReport[]        @relation("ExpenseReportUpdater")
+  reportLogs             ExpenseReportLog[]
+  uploadedAttachments    ExpenseAttachment[]    @relation("ExpenseAttachmentUploader")
+  invoiceCreatedBy       ExpenseInvoice[]       @relation("ExpenseInvoiceCreator")
+  assignedApprovalTasks  ExpenseApprovalTask[]  @relation("ApprovalTaskAssignee")
+  operatedApprovalLogs   ExpenseApprovalLog[]   @relation("ApprovalLogOperator")
+  createdBudgets         Budget[]               @relation("BudgetCreator")
+  updatedBudgets         Budget[]               @relation("BudgetUpdater")
+  operatedBudgetLogs     BudgetOperationLog[]   @relation("BudgetLogOperator")
   operatedFinanceReviews ExpenseFinanceReview[] @relation("FinanceReviewOperator")
-  operatedPaymentBatches ExpensePaymentBatch[] @relation("PaymentBatchOperator")
-  operatedPayments       ExpensePayment[]      @relation("PaymentOperator")
-  systemAuditLogs         SystemAuditLog[]      @relation("SystemAuditOperator")
+  operatedPaymentBatches ExpensePaymentBatch[]  @relation("PaymentBatchOperator")
+  operatedPayments       ExpensePayment[]       @relation("PaymentOperator")
+  systemAuditLogs        SystemAuditLog[]       @relation("SystemAuditOperator")
+  createdAccountSubjects GlAccountSubject[]     @relation("GlAccountSubjectCreator")
+  updatedAccountSubjects GlAccountSubject[]     @relation("GlAccountSubjectUpdater")
+  createdAccountMappings GlAccountMapping[]     @relation("GlAccountMappingCreator")
+  updatedAccountMappings GlAccountMapping[]     @relation("GlAccountMappingUpdater")
+  glAccountMappings      GlAccountMapping[]
+  generatedVouchers      GlVoucher[]            @relation("GlVoucherGenerator")
+  confirmedVouchers      GlVoucher[]            @relation("GlVoucherConfirmer")
+  operatedVoucherLogs    GlVoucherLog[]         @relation("GlVoucherLogOperator")
 
   @@map("iam_users")
 }
 
 model Role {
-  id          String          @id @default(cuid())
-  code        String          @unique
+  id          String           @id @default(cuid())
+  code        String           @unique
   name        String
   description String?
-  status      RoleStatus      @default(ACTIVE)
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-  deletedAt   DateTime?       @map("deleted_at")
+  status      RoleStatus       @default(ACTIVE)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  deletedAt   DateTime?        @map("deleted_at")
   users       UserRole[]
   permissions RolePermission[]
   dataScopes  DataScope[]
@@ -314,66 +380,72 @@ model DataScope {
 }
 
 model Department {
-  id          String           @id @default(cuid())
-  code        String           @unique
-  name        String
-  parentId    String?          @map("parent_id")
-  status      MasterDataStatus @default(ACTIVE)
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  deletedAt   DateTime?        @map("deleted_at")
-  parent      Department?      @relation("DepartmentTree", fields: [parentId], references: [id])
-  children    Department[]     @relation("DepartmentTree")
-  users       User[]
-  costCenters CostCenter[]
-  projects    Project[]
-  dataScopes  DataScope[]
-  expenseReports ExpenseReport[]
-  expenseItems   ExpenseReportItem[]
-  budgets        Budget[]
+  id                String              @id @default(cuid())
+  code              String              @unique
+  name              String
+  parentId          String?             @map("parent_id")
+  status            MasterDataStatus    @default(ACTIVE)
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  deletedAt         DateTime?           @map("deleted_at")
+  parent            Department?         @relation("DepartmentTree", fields: [parentId], references: [id])
+  children          Department[]        @relation("DepartmentTree")
+  users             User[]
+  costCenters       CostCenter[]
+  projects          Project[]
+  dataScopes        DataScope[]
+  expenseReports    ExpenseReport[]
+  expenseItems      ExpenseReportItem[]
+  budgets           Budget[]
+  glAccountMappings GlAccountMapping[]
+  voucherLines      GlVoucherLine[]
 
   @@map("md_departments")
 }
 
 model CostCenter {
-  id           String           @id @default(cuid())
-  code         String           @unique
-  name         String
-  departmentId String?          @map("department_id")
-  status       MasterDataStatus @default(ACTIVE)
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
-  deletedAt    DateTime?        @map("deleted_at")
-  department   Department?      @relation(fields: [departmentId], references: [id])
-  users        User[]
-  projects     Project[]
-  dataScopes   DataScope[]
-  expenseReports ExpenseReport[]
-  expenseItems   ExpenseReportItem[]
-  budgets        Budget[]
+  id                String              @id @default(cuid())
+  code              String              @unique
+  name              String
+  departmentId      String?             @map("department_id")
+  status            MasterDataStatus    @default(ACTIVE)
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  deletedAt         DateTime?           @map("deleted_at")
+  department        Department?         @relation(fields: [departmentId], references: [id])
+  users             User[]
+  projects          Project[]
+  dataScopes        DataScope[]
+  expenseReports    ExpenseReport[]
+  expenseItems      ExpenseReportItem[]
+  budgets           Budget[]
+  glAccountMappings GlAccountMapping[]
+  voucherLines      GlVoucherLine[]
 
   @@map("md_cost_centers")
 }
 
 model Project {
-  id           String           @id @default(cuid())
-  code         String           @unique
-  name         String
-  ownerUserId  String?          @map("owner_user_id")
-  departmentId String?          @map("department_id")
-  costCenterId String?          @map("cost_center_id")
-  status       MasterDataStatus @default(ACTIVE)
-  startsAt     DateTime?        @map("starts_at")
-  endsAt       DateTime?        @map("ends_at")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
-  deletedAt    DateTime?        @map("deleted_at")
-  department   Department?      @relation(fields: [departmentId], references: [id])
-  costCenter   CostCenter?      @relation(fields: [costCenterId], references: [id])
-  dataScopes   DataScope[]
-  expenseReports ExpenseReport[]
-  expenseItems   ExpenseReportItem[]
-  budgets        Budget[]
+  id                String              @id @default(cuid())
+  code              String              @unique
+  name              String
+  ownerUserId       String?             @map("owner_user_id")
+  departmentId      String?             @map("department_id")
+  costCenterId      String?             @map("cost_center_id")
+  status            MasterDataStatus    @default(ACTIVE)
+  startsAt          DateTime?           @map("starts_at")
+  endsAt            DateTime?           @map("ends_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  deletedAt         DateTime?           @map("deleted_at")
+  department        Department?         @relation(fields: [departmentId], references: [id])
+  costCenter        CostCenter?         @relation(fields: [costCenterId], references: [id])
+  dataScopes        DataScope[]
+  expenseReports    ExpenseReport[]
+  expenseItems      ExpenseReportItem[]
+  budgets           Budget[]
+  glAccountMappings GlAccountMapping[]
+  voucherLines      GlVoucherLine[]
 
   @@map("md_projects")
 }
@@ -393,42 +465,44 @@ model ExpenseType {
 }
 
 model ExpenseReport {
-  id                    String                @id @default(cuid())
-  reportNo              String                @unique @map("report_no")
-  title                 String
-  applicantId           String                @map("applicant_id")
-  departmentId          String?               @map("department_id")
-  costCenterId          String?               @map("cost_center_id")
-  projectId             String?               @map("project_id")
-  status                ExpenseReportStatus   @default(DRAFT)
-  currency              String                @default("CNY")
-  amountCents           Int                   @default(0) @map("amount_cents")
-  taxAmountCents        Int                   @default(0) @map("tax_amount_cents")
-  deductibleTaxCents    Int                   @default(0) @map("deductible_tax_cents")
-  reimbursableCents     Int                   @default(0) @map("reimbursable_cents")
-  paidAmountCents       Int                   @default(0) @map("paid_amount_cents")
-  submittedAt           DateTime?             @map("submitted_at")
-  createdAt             DateTime              @default(now()) @map("created_at")
-  updatedAt             DateTime              @updatedAt @map("updated_at")
-  deletedAt             DateTime?             @map("deleted_at")
-  applicant             User                  @relation("ExpenseReportApplicant", fields: [applicantId], references: [id])
-  updatedById           String?               @map("updated_by")
-  updatedBy             User?                 @relation("ExpenseReportUpdater", fields: [updatedById], references: [id])
-  department            Department?           @relation(fields: [departmentId], references: [id])
-  costCenter            CostCenter?           @relation(fields: [costCenterId], references: [id])
-  project               Project?              @relation(fields: [projectId], references: [id])
-  items                 ExpenseReportItem[]
-  logs                  ExpenseReportLog[]
-  attachments           ExpenseAttachment[]
-  invoices              ExpenseInvoice[]
-  approvalInstances     ExpenseApprovalInstance[]
-  approvalTasks         ExpenseApprovalTask[]
-  policyChecks          ExpensePolicyCheck[]
-  budgetOccupations     BudgetOccupation[]
-  budgetChecks          ExpenseBudgetCheck[]
-  financeReviews        ExpenseFinanceReview[]
-  paymentBatches         ExpensePaymentBatch[]
-  payments               ExpensePayment[]
+  id                 String                    @id @default(cuid())
+  reportNo           String                    @unique @map("report_no")
+  title              String
+  applicantId        String                    @map("applicant_id")
+  departmentId       String?                   @map("department_id")
+  costCenterId       String?                   @map("cost_center_id")
+  projectId          String?                   @map("project_id")
+  status             ExpenseReportStatus       @default(DRAFT)
+  currency           String                    @default("CNY")
+  amountCents        Int                       @default(0) @map("amount_cents")
+  taxAmountCents     Int                       @default(0) @map("tax_amount_cents")
+  deductibleTaxCents Int                       @default(0) @map("deductible_tax_cents")
+  reimbursableCents  Int                       @default(0) @map("reimbursable_cents")
+  paidAmountCents    Int                       @default(0) @map("paid_amount_cents")
+  submittedAt        DateTime?                 @map("submitted_at")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  deletedAt          DateTime?                 @map("deleted_at")
+  applicant          User                      @relation("ExpenseReportApplicant", fields: [applicantId], references: [id])
+  updatedById        String?                   @map("updated_by")
+  updatedBy          User?                     @relation("ExpenseReportUpdater", fields: [updatedById], references: [id])
+  department         Department?               @relation(fields: [departmentId], references: [id])
+  costCenter         CostCenter?               @relation(fields: [costCenterId], references: [id])
+  project            Project?                  @relation(fields: [projectId], references: [id])
+  items              ExpenseReportItem[]
+  logs               ExpenseReportLog[]
+  attachments        ExpenseAttachment[]
+  invoices           ExpenseInvoice[]
+  approvalInstances  ExpenseApprovalInstance[]
+  approvalTasks      ExpenseApprovalTask[]
+  policyChecks       ExpensePolicyCheck[]
+  budgetOccupations  BudgetOccupation[]
+  budgetChecks       ExpenseBudgetCheck[]
+  financeReviews     ExpenseFinanceReview[]
+  paymentBatches     ExpensePaymentBatch[]
+  payments           ExpensePayment[]
+  vouchers           GlVoucher[]
+  voucherLines       GlVoucherLine[]
 
   @@index([applicantId, status])
   @@index([departmentId])
@@ -438,30 +512,30 @@ model ExpenseReport {
 }
 
 model ExpenseApprovalFlowConfig {
-  id            String                   @id @default(cuid())
-  code          String                   @unique
-  name          String
-  description   String?
-  approverRoleCode String                @map("approver_role_code")
-  status        ApprovalFlowConfigStatus @default(ACTIVE)
-  createdAt     DateTime                 @default(now()) @map("created_at")
-  updatedAt     DateTime                 @updatedAt @map("updated_at")
-  instances     ExpenseApprovalInstance[]
+  id               String                    @id @default(cuid())
+  code             String                    @unique
+  name             String
+  description      String?
+  approverRoleCode String                    @map("approver_role_code")
+  status           ApprovalFlowConfigStatus  @default(ACTIVE)
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+  instances        ExpenseApprovalInstance[]
 
   @@map("exp_approval_flow_configs")
 }
 
 model ExpensePolicy {
-  id            String              @id @default(cuid())
-  code          String              @unique
+  id            String               @id @default(cuid())
+  code          String               @unique
   name          String
   description   String?
-  status        ExpensePolicyStatus @default(ACTIVE)
-  effectiveFrom DateTime?           @map("effective_from")
-  effectiveTo   DateTime?           @map("effective_to")
-  createdAt     DateTime            @default(now()) @map("created_at")
-  updatedAt     DateTime            @updatedAt @map("updated_at")
-  deletedAt     DateTime?           @map("deleted_at")
+  status        ExpensePolicyStatus  @default(ACTIVE)
+  effectiveFrom DateTime?            @map("effective_from")
+  effectiveTo   DateTime?            @map("effective_to")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+  deletedAt     DateTime?            @map("deleted_at")
   rules         ExpensePolicyRule[]
   checks        ExpensePolicyCheck[]
 
@@ -469,22 +543,22 @@ model ExpensePolicy {
 }
 
 model ExpensePolicyRule {
-  id                  String              @id @default(cuid())
-  policyId            String              @map("policy_id")
+  id                  String               @id @default(cuid())
+  policyId            String               @map("policy_id")
   code                String
   name                String
   description         String?
-  expenseTypeCode     String?             @map("expense_type_code")
+  expenseTypeCode     String?              @map("expense_type_code")
   city                String?
-  jobLevel            String?             @map("job_level")
-  maxAmountCents      Int?                @map("max_amount_cents")
-  requiresInvoice     Boolean             @default(false) @map("requires_invoice")
-  requiresPreApproval Boolean             @default(false) @map("requires_pre_approval")
-  action              ExpensePolicyAction @default(WARNING)
-  status              ExpensePolicyStatus @default(ACTIVE)
-  createdAt           DateTime            @default(now()) @map("created_at")
-  updatedAt           DateTime            @updatedAt @map("updated_at")
-  policy              ExpensePolicy       @relation(fields: [policyId], references: [id])
+  jobLevel            String?              @map("job_level")
+  maxAmountCents      Int?                 @map("max_amount_cents")
+  requiresInvoice     Boolean              @default(false) @map("requires_invoice")
+  requiresPreApproval Boolean              @default(false) @map("requires_pre_approval")
+  action              ExpensePolicyAction  @default(WARNING)
+  status              ExpensePolicyStatus  @default(ACTIVE)
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  policy              ExpensePolicy        @relation(fields: [policyId], references: [id])
   checks              ExpensePolicyCheck[]
 
   @@unique([policyId, code])
@@ -493,19 +567,19 @@ model ExpensePolicyRule {
 }
 
 model ExpenseApprovalInstance {
-  id          String                 @id @default(cuid())
-  reportId    String                 @map("report_id")
-  flowConfigId String                @map("flow_config_id")
-  status      ApprovalInstanceStatus @default(IN_PROGRESS)
-  startedById String                 @map("started_by")
-  startedAt   DateTime               @default(now()) @map("started_at")
-  completedAt DateTime?              @map("completed_at")
-  createdAt   DateTime               @default(now()) @map("created_at")
-  updatedAt   DateTime               @updatedAt @map("updated_at")
-  report      ExpenseReport          @relation(fields: [reportId], references: [id])
-  flowConfig  ExpenseApprovalFlowConfig @relation(fields: [flowConfigId], references: [id])
-  tasks       ExpenseApprovalTask[]
-  logs        ExpenseApprovalLog[]
+  id           String                    @id @default(cuid())
+  reportId     String                    @map("report_id")
+  flowConfigId String                    @map("flow_config_id")
+  status       ApprovalInstanceStatus    @default(IN_PROGRESS)
+  startedById  String                    @map("started_by")
+  startedAt    DateTime                  @default(now()) @map("started_at")
+  completedAt  DateTime?                 @map("completed_at")
+  createdAt    DateTime                  @default(now()) @map("created_at")
+  updatedAt    DateTime                  @updatedAt @map("updated_at")
+  report       ExpenseReport             @relation(fields: [reportId], references: [id])
+  flowConfig   ExpenseApprovalFlowConfig @relation(fields: [flowConfigId], references: [id])
+  tasks        ExpenseApprovalTask[]
+  logs         ExpenseApprovalLog[]
 
   @@index([reportId, status])
   @@index([flowConfigId])
@@ -513,19 +587,19 @@ model ExpenseApprovalInstance {
 }
 
 model ExpenseApprovalTask {
-  id          String             @id @default(cuid())
-  instanceId  String             @map("instance_id")
-  reportId    String             @map("report_id")
-  nodeCode    String             @map("node_code")
-  nodeName    String             @map("node_name")
-  assigneeId  String             @map("assignee_id")
-  status      ApprovalTaskStatus @default(PENDING)
+  id          String                  @id @default(cuid())
+  instanceId  String                  @map("instance_id")
+  reportId    String                  @map("report_id")
+  nodeCode    String                  @map("node_code")
+  nodeName    String                  @map("node_name")
+  assigneeId  String                  @map("assignee_id")
+  status      ApprovalTaskStatus      @default(PENDING)
   comment     String?
-  createdAt   DateTime           @default(now()) @map("created_at")
-  completedAt DateTime?          @map("completed_at")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  completedAt DateTime?               @map("completed_at")
   instance    ExpenseApprovalInstance @relation(fields: [instanceId], references: [id])
-  report      ExpenseReport      @relation(fields: [reportId], references: [id])
-  assignee    User               @relation("ApprovalTaskAssignee", fields: [assigneeId], references: [id])
+  report      ExpenseReport           @relation(fields: [reportId], references: [id])
+  assignee    User                    @relation("ApprovalTaskAssignee", fields: [assigneeId], references: [id])
   logs        ExpenseApprovalLog[]
 
   @@index([assigneeId, status])
@@ -535,18 +609,18 @@ model ExpenseApprovalTask {
 }
 
 model ExpenseApprovalLog {
-  id          String         @id @default(cuid())
-  instanceId  String         @map("instance_id")
-  taskId      String?        @map("task_id")
-  operatorId  String         @map("operator_id")
-  action      ApprovalAction
-  fromStatus  ApprovalTaskStatus? @map("from_status")
-  toStatus    ApprovalTaskStatus? @map("to_status")
-  comment     String?
-  createdAt   DateTime       @default(now()) @map("created_at")
-  instance    ExpenseApprovalInstance @relation(fields: [instanceId], references: [id])
-  task        ExpenseApprovalTask?    @relation(fields: [taskId], references: [id])
-  operator    User           @relation("ApprovalLogOperator", fields: [operatorId], references: [id])
+  id         String                  @id @default(cuid())
+  instanceId String                  @map("instance_id")
+  taskId     String?                 @map("task_id")
+  operatorId String                  @map("operator_id")
+  action     ApprovalAction
+  fromStatus ApprovalTaskStatus?     @map("from_status")
+  toStatus   ApprovalTaskStatus?     @map("to_status")
+  comment    String?
+  createdAt  DateTime                @default(now()) @map("created_at")
+  instance   ExpenseApprovalInstance @relation(fields: [instanceId], references: [id])
+  task       ExpenseApprovalTask?    @relation(fields: [taskId], references: [id])
+  operator   User                    @relation("ApprovalLogOperator", fields: [operatorId], references: [id])
 
   @@index([instanceId])
   @@index([taskId])
@@ -555,29 +629,30 @@ model ExpenseApprovalLog {
 }
 
 model ExpenseReportItem {
-  id                    String        @id @default(cuid())
-  reportId              String        @map("report_id")
-  occurredAt            DateTime      @map("occurred_at")
-  expenseTypeCode       String        @map("expense_type_code")
-  accountSubjectCode    String?       @map("account_subject_code")
-  description           String
-  departmentId          String?       @map("department_id")
-  costCenterId          String?       @map("cost_center_id")
-  projectId             String?       @map("project_id")
-  amountCents           Int           @map("amount_cents")
-  taxAmountCents        Int           @default(0) @map("tax_amount_cents")
-  deductibleTaxCents    Int           @default(0) @map("deductible_tax_cents")
-  reimbursableCents     Int           @map("reimbursable_cents")
-  createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
-  report                ExpenseReport @relation(fields: [reportId], references: [id])
-  department            Department?   @relation(fields: [departmentId], references: [id])
-  costCenter            CostCenter?   @relation(fields: [costCenterId], references: [id])
-  project               Project?      @relation(fields: [projectId], references: [id])
-  invoices              ExpenseInvoice[]
-  policyChecks          ExpensePolicyCheck[]
-  budgetOccupations     BudgetOccupation[]
-  budgetChecks          ExpenseBudgetCheck[]
+  id                 String               @id @default(cuid())
+  reportId           String               @map("report_id")
+  occurredAt         DateTime             @map("occurred_at")
+  expenseTypeCode    String               @map("expense_type_code")
+  accountSubjectCode String?              @map("account_subject_code")
+  description        String
+  departmentId       String?              @map("department_id")
+  costCenterId       String?              @map("cost_center_id")
+  projectId          String?              @map("project_id")
+  amountCents        Int                  @map("amount_cents")
+  taxAmountCents     Int                  @default(0) @map("tax_amount_cents")
+  deductibleTaxCents Int                  @default(0) @map("deductible_tax_cents")
+  reimbursableCents  Int                  @map("reimbursable_cents")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  report             ExpenseReport        @relation(fields: [reportId], references: [id])
+  department         Department?          @relation(fields: [departmentId], references: [id])
+  costCenter         CostCenter?          @relation(fields: [costCenterId], references: [id])
+  project            Project?             @relation(fields: [projectId], references: [id])
+  invoices           ExpenseInvoice[]
+  policyChecks       ExpensePolicyCheck[]
+  budgetOccupations  BudgetOccupation[]
+  budgetChecks       ExpenseBudgetCheck[]
+  voucherLines       GlVoucherLine[]
 
   @@index([reportId])
   @@map("exp_report_items")
@@ -604,70 +679,70 @@ model ExpensePolicyCheck {
 }
 
 model Budget {
-  id                    String            @id @default(cuid())
-  code                  String            @unique
-  name                  String
-  fiscalPeriod          String            @map("fiscal_period")
-  departmentId          String?           @map("department_id")
-  costCenterId          String?           @map("cost_center_id")
-  projectId             String?           @map("project_id")
-  expenseTypeCode       String?           @map("expense_type_code")
-  accountSubjectCode    String?           @map("account_subject_code")
-  currency              String            @default("CNY")
-  totalCents            Int               @map("total_cents")
-  inTransitCents        Int               @default(0) @map("in_transit_cents")
-  approvedCents         Int               @default(0) @map("approved_cents")
-  actualCents           Int               @default(0) @map("actual_cents")
-  warningThresholdBps   Int               @default(9000) @map("warning_threshold_bps")
-  controlMode           BudgetControlMode @default(WARNING) @map("control_mode")
-  status                BudgetStatus      @default(ACTIVE)
-  createdById           String            @map("created_by")
-  updatedById           String?           @map("updated_by")
-  createdAt             DateTime          @default(now()) @map("created_at")
-  updatedAt             DateTime          @updatedAt @map("updated_at")
-  deletedAt             DateTime?         @map("deleted_at")
-  department            Department?       @relation(fields: [departmentId], references: [id])
-  costCenter            CostCenter?       @relation(fields: [costCenterId], references: [id])
-  project               Project?          @relation(fields: [projectId], references: [id])
-  createdBy             User              @relation("BudgetCreator", fields: [createdById], references: [id])
-  updatedBy             User?             @relation("BudgetUpdater", fields: [updatedById], references: [id])
-  occupations           BudgetOccupation[]
-  checks                ExpenseBudgetCheck[]
-  logs                  BudgetOperationLog[]
+  id                  String               @id @default(cuid())
+  code                String               @unique
+  name                String
+  fiscalPeriod        String               @map("fiscal_period")
+  departmentId        String?              @map("department_id")
+  costCenterId        String?              @map("cost_center_id")
+  projectId           String?              @map("project_id")
+  expenseTypeCode     String?              @map("expense_type_code")
+  accountSubjectCode  String?              @map("account_subject_code")
+  currency            String               @default("CNY")
+  totalCents          Int                  @map("total_cents")
+  inTransitCents      Int                  @default(0) @map("in_transit_cents")
+  approvedCents       Int                  @default(0) @map("approved_cents")
+  actualCents         Int                  @default(0) @map("actual_cents")
+  warningThresholdBps Int                  @default(9000) @map("warning_threshold_bps")
+  controlMode         BudgetControlMode    @default(WARNING) @map("control_mode")
+  status              BudgetStatus         @default(ACTIVE)
+  createdById         String               @map("created_by")
+  updatedById         String?              @map("updated_by")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  deletedAt           DateTime?            @map("deleted_at")
+  department          Department?          @relation(fields: [departmentId], references: [id])
+  costCenter          CostCenter?          @relation(fields: [costCenterId], references: [id])
+  project             Project?             @relation(fields: [projectId], references: [id])
+  createdBy           User                 @relation("BudgetCreator", fields: [createdById], references: [id])
+  updatedBy           User?                @relation("BudgetUpdater", fields: [updatedById], references: [id])
+  occupations         BudgetOccupation[]
+  checks              ExpenseBudgetCheck[]
+  logs                BudgetOperationLog[]
 
+  @@unique([fiscalPeriod, departmentId, costCenterId, projectId, expenseTypeCode, accountSubjectCode, currency])
   @@index([fiscalPeriod, status])
   @@index([departmentId])
   @@index([costCenterId])
   @@index([projectId])
   @@index([expenseTypeCode])
-  @@unique([fiscalPeriod, departmentId, costCenterId, projectId, expenseTypeCode, accountSubjectCode, currency])
   @@map("bud_budgets")
 }
 
 model BudgetOccupation {
-  id                    String                 @id @default(cuid())
-  budgetId              String                 @map("budget_id")
-  reportId              String                 @map("report_id")
-  itemId                String                 @map("item_id")
-  status                BudgetOccupationStatus @default(IN_TRANSIT)
-  fiscalPeriod          String                 @map("fiscal_period")
-  departmentId          String?                @map("department_id")
-  costCenterId          String?                @map("cost_center_id")
-  projectId             String?                @map("project_id")
-  expenseTypeCode       String                 @map("expense_type_code")
-  accountSubjectCode    String?                @map("account_subject_code")
-  currency              String                 @default("CNY")
-  occupiedCents         Int                    @map("occupied_cents")
-  approvedCents         Int                    @default(0) @map("approved_cents")
-  actualCents           Int                    @default(0) @map("actual_cents")
-  releasedCents         Int                    @default(0) @map("released_cents")
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
-  releasedAt            DateTime?              @map("released_at")
-  budget                Budget                 @relation(fields: [budgetId], references: [id])
-  report                ExpenseReport          @relation(fields: [reportId], references: [id])
-  item                  ExpenseReportItem      @relation(fields: [itemId], references: [id])
-  logs                  BudgetOperationLog[]
+  id                 String                 @id @default(cuid())
+  budgetId           String                 @map("budget_id")
+  reportId           String                 @map("report_id")
+  itemId             String                 @map("item_id")
+  status             BudgetOccupationStatus @default(IN_TRANSIT)
+  fiscalPeriod       String                 @map("fiscal_period")
+  departmentId       String?                @map("department_id")
+  costCenterId       String?                @map("cost_center_id")
+  projectId          String?                @map("project_id")
+  expenseTypeCode    String                 @map("expense_type_code")
+  accountSubjectCode String?                @map("account_subject_code")
+  currency           String                 @default("CNY")
+  occupiedCents      Int                    @map("occupied_cents")
+  approvedCents      Int                    @default(0) @map("approved_cents")
+  actualCents        Int                    @default(0) @map("actual_cents")
+  releasedCents      Int                    @default(0) @map("released_cents")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  releasedAt         DateTime?              @map("released_at")
+  budget             Budget                 @relation(fields: [budgetId], references: [id])
+  report             ExpenseReport          @relation(fields: [reportId], references: [id])
+  item               ExpenseReportItem      @relation(fields: [itemId], references: [id])
+  logs               BudgetOperationLog[]
 
   @@index([budgetId, status])
   @@index([reportId, status])
@@ -676,16 +751,16 @@ model BudgetOccupation {
 }
 
 model ExpenseBudgetCheck {
-  id          String            @id @default(cuid())
-  reportId    String            @map("report_id")
-  itemId      String?           @map("item_id")
-  budgetId    String?           @map("budget_id")
-  result      BudgetCheckResult
-  message     String
-  createdAt   DateTime          @default(now()) @map("created_at")
-  report      ExpenseReport     @relation(fields: [reportId], references: [id])
-  item        ExpenseReportItem? @relation(fields: [itemId], references: [id])
-  budget      Budget?           @relation(fields: [budgetId], references: [id])
+  id        String             @id @default(cuid())
+  reportId  String             @map("report_id")
+  itemId    String?            @map("item_id")
+  budgetId  String?            @map("budget_id")
+  result    BudgetCheckResult
+  message   String
+  createdAt DateTime           @default(now()) @map("created_at")
+  report    ExpenseReport      @relation(fields: [reportId], references: [id])
+  item      ExpenseReportItem? @relation(fields: [itemId], references: [id])
+  budget    Budget?            @relation(fields: [budgetId], references: [id])
 
   @@index([reportId, result])
   @@index([budgetId])
@@ -693,23 +768,23 @@ model ExpenseBudgetCheck {
 }
 
 model BudgetOperationLog {
-  id            String            @id @default(cuid())
-  budgetId      String            @map("budget_id")
-  occupationId  String?           @map("occupation_id")
-  operatorId    String            @map("operator_id")
-  action        BudgetAction
-  amountCents   Int               @map("amount_cents")
-  beforeInTransitCents Int         @map("before_in_transit_cents")
-  afterInTransitCents  Int         @map("after_in_transit_cents")
-  beforeApprovedCents  Int         @map("before_approved_cents")
-  afterApprovedCents   Int         @map("after_approved_cents")
-  beforeActualCents    Int         @map("before_actual_cents")
-  afterActualCents     Int         @map("after_actual_cents")
-  comment       String?
-  createdAt     DateTime          @default(now()) @map("created_at")
-  budget        Budget            @relation(fields: [budgetId], references: [id])
-  occupation    BudgetOccupation? @relation(fields: [occupationId], references: [id])
-  operator      User              @relation("BudgetLogOperator", fields: [operatorId], references: [id])
+  id                   String            @id @default(cuid())
+  budgetId             String            @map("budget_id")
+  occupationId         String?           @map("occupation_id")
+  operatorId           String            @map("operator_id")
+  action               BudgetAction
+  amountCents          Int               @map("amount_cents")
+  beforeInTransitCents Int               @map("before_in_transit_cents")
+  afterInTransitCents  Int               @map("after_in_transit_cents")
+  beforeApprovedCents  Int               @map("before_approved_cents")
+  afterApprovedCents   Int               @map("after_approved_cents")
+  beforeActualCents    Int               @map("before_actual_cents")
+  afterActualCents     Int               @map("after_actual_cents")
+  comment              String?
+  createdAt            DateTime          @default(now()) @map("created_at")
+  budget               Budget            @relation(fields: [budgetId], references: [id])
+  occupation           BudgetOccupation? @relation(fields: [occupationId], references: [id])
+  operator             User              @relation("BudgetLogOperator", fields: [operatorId], references: [id])
 
   @@index([budgetId])
   @@index([occupationId])
@@ -718,16 +793,16 @@ model BudgetOperationLog {
 }
 
 model ExpenseFinanceReview {
-  id          String              @id @default(cuid())
-  reportId    String              @map("report_id")
-  operatorId  String              @map("operator_id")
-  action      FinanceReviewAction
-  fromStatus  ExpenseReportStatus @map("from_status")
-  toStatus    ExpenseReportStatus @map("to_status")
-  comment     String?
-  createdAt   DateTime            @default(now()) @map("created_at")
-  report      ExpenseReport       @relation(fields: [reportId], references: [id])
-  operator    User                @relation("FinanceReviewOperator", fields: [operatorId], references: [id])
+  id         String              @id @default(cuid())
+  reportId   String              @map("report_id")
+  operatorId String              @map("operator_id")
+  action     FinanceReviewAction
+  fromStatus ExpenseReportStatus @map("from_status")
+  toStatus   ExpenseReportStatus @map("to_status")
+  comment    String?
+  createdAt  DateTime            @default(now()) @map("created_at")
+  report     ExpenseReport       @relation(fields: [reportId], references: [id])
+  operator   User                @relation("FinanceReviewOperator", fields: [operatorId], references: [id])
 
   @@index([reportId])
   @@index([operatorId])
@@ -735,20 +810,20 @@ model ExpenseFinanceReview {
 }
 
 model ExpensePaymentBatch {
-  id              String             @id @default(cuid())
-  batchNo         String             @unique @map("batch_no")
-  name            String?
-  status          PaymentBatchStatus @default(COMPLETED)
-  totalAmountCents Int               @map("total_amount_cents")
-  currency        String             @default("CNY")
-  operatorId      String             @map("operator_id")
-  comment         String?
-  createdAt       DateTime           @default(now()) @map("created_at")
-  completedAt     DateTime?          @map("completed_at")
-  reportId        String?            @map("report_id")
-  report          ExpenseReport?     @relation(fields: [reportId], references: [id])
-  operator        User               @relation("PaymentBatchOperator", fields: [operatorId], references: [id])
-  payments        ExpensePayment[]
+  id               String             @id @default(cuid())
+  batchNo          String             @unique @map("batch_no")
+  name             String?
+  status           PaymentBatchStatus @default(COMPLETED)
+  totalAmountCents Int                @map("total_amount_cents")
+  currency         String             @default("CNY")
+  operatorId       String             @map("operator_id")
+  comment          String?
+  createdAt        DateTime           @default(now()) @map("created_at")
+  completedAt      DateTime?          @map("completed_at")
+  reportId         String?            @map("report_id")
+  report           ExpenseReport?     @relation(fields: [reportId], references: [id])
+  operator         User               @relation("PaymentBatchOperator", fields: [operatorId], references: [id])
+  payments         ExpensePayment[]
 
   @@index([operatorId])
   @@index([reportId])
@@ -757,26 +832,28 @@ model ExpensePaymentBatch {
 }
 
 model ExpensePayment {
-  id                 String              @id @default(cuid())
-  reportId           String              @map("report_id")
-  batchId            String?             @map("batch_id")
-  operatorId         String              @map("operator_id")
-  status             PaymentStatus
-  method             PaymentMethod       @default(BANK_TRANSFER)
-  amountCents        Int                 @map("amount_cents")
-  currency           String              @default("CNY")
-  paidAt             DateTime?           @map("paid_at")
-  paymentReference   String?             @map("payment_reference")
-  payerAccount       String?             @map("payer_account")
-  payeeAccount       String?             @map("payee_account")
-  failureReason      String?             @map("failure_reason")
-  comment            String?
-  fromStatus         ExpenseReportStatus @map("from_status")
-  toStatus           ExpenseReportStatus @map("to_status")
-  createdAt          DateTime            @default(now()) @map("created_at")
-  report             ExpenseReport       @relation(fields: [reportId], references: [id])
-  batch              ExpensePaymentBatch? @relation(fields: [batchId], references: [id])
-  operator           User                @relation("PaymentOperator", fields: [operatorId], references: [id])
+  id               String               @id @default(cuid())
+  reportId         String               @map("report_id")
+  batchId          String?              @map("batch_id")
+  operatorId       String               @map("operator_id")
+  status           PaymentStatus
+  method           PaymentMethod        @default(BANK_TRANSFER)
+  amountCents      Int                  @map("amount_cents")
+  currency         String               @default("CNY")
+  paidAt           DateTime?            @map("paid_at")
+  paymentReference String?              @map("payment_reference")
+  payerAccount     String?              @map("payer_account")
+  payeeAccount     String?              @map("payee_account")
+  failureReason    String?              @map("failure_reason")
+  comment          String?
+  fromStatus       ExpenseReportStatus  @map("from_status")
+  toStatus         ExpenseReportStatus  @map("to_status")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  report           ExpenseReport        @relation(fields: [reportId], references: [id])
+  batch            ExpensePaymentBatch? @relation(fields: [batchId], references: [id])
+  operator         User                 @relation("PaymentOperator", fields: [operatorId], references: [id])
+  vouchers         GlVoucher[]
+  voucherLines     GlVoucherLine[]
 
   @@index([reportId, status])
   @@index([batchId])
@@ -785,19 +862,19 @@ model ExpensePayment {
 }
 
 model ExpenseAttachment {
-  id              String                    @id @default(cuid())
-  reportId        String                    @map("report_id")
-  fileName        String                    @map("file_name")
-  mimeType        String                    @map("mime_type")
-  sizeBytes       Int                       @map("size_bytes")
-  storageBucket   String                    @map("storage_bucket")
-  storageKey      String                    @map("storage_key")
-  category        ExpenseAttachmentCategory @default(GENERAL)
-  uploadedById    String                    @map("uploaded_by")
-  createdAt       DateTime                  @default(now()) @map("created_at")
-  deletedAt       DateTime?                 @map("deleted_at")
-  report          ExpenseReport             @relation(fields: [reportId], references: [id])
-  uploadedBy      User                      @relation("ExpenseAttachmentUploader", fields: [uploadedById], references: [id])
+  id            String                    @id @default(cuid())
+  reportId      String                    @map("report_id")
+  fileName      String                    @map("file_name")
+  mimeType      String                    @map("mime_type")
+  sizeBytes     Int                       @map("size_bytes")
+  storageBucket String                    @map("storage_bucket")
+  storageKey    String                    @map("storage_key")
+  category      ExpenseAttachmentCategory @default(GENERAL)
+  uploadedById  String                    @map("uploaded_by")
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  deletedAt     DateTime?                 @map("deleted_at")
+  report        ExpenseReport             @relation(fields: [reportId], references: [id])
+  uploadedBy    User                      @relation("ExpenseAttachmentUploader", fields: [uploadedById], references: [id])
 
   @@index([reportId])
   @@index([uploadedById])
@@ -805,32 +882,32 @@ model ExpenseAttachment {
 }
 
 model ExpenseInvoice {
-  id                    String                 @id @default(cuid())
-  reportId              String                 @map("report_id")
-  itemId                String?                @map("item_id")
-  invoiceCode           String?                @map("invoice_code")
-  invoiceNo             String                 @map("invoice_no")
-  issuedAt              DateTime               @map("issued_at")
-  sellerName            String                 @map("seller_name")
-  sellerTaxNo           String?                @map("seller_tax_no")
-  buyerName             String?                @map("buyer_name")
-  buyerTaxNo            String?                @map("buyer_tax_no")
-  amountCents           Int                    @map("amount_cents")
-  taxAmountCents        Int                    @default(0) @map("tax_amount_cents")
-  deductibleTaxCents    Int                    @default(0) @map("deductible_tax_cents")
-  totalAmountCents      Int                    @map("total_amount_cents")
-  currency              String                 @default("CNY")
-  duplicateStatus       InvoiceDuplicateStatus @default(UNIQUE) @map("duplicate_status")
-  duplicateOfId         String?                @map("duplicate_of_id")
-  createdById           String                 @map("created_by")
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
-  deletedAt             DateTime?              @map("deleted_at")
-  report                ExpenseReport          @relation(fields: [reportId], references: [id])
-  item                  ExpenseReportItem?     @relation(fields: [itemId], references: [id])
-  duplicateOf           ExpenseInvoice?        @relation("InvoiceDuplicate", fields: [duplicateOfId], references: [id])
-  duplicates            ExpenseInvoice[]       @relation("InvoiceDuplicate")
-  createdBy             User                   @relation("ExpenseInvoiceCreator", fields: [createdById], references: [id])
+  id                 String                 @id @default(cuid())
+  reportId           String                 @map("report_id")
+  itemId             String?                @map("item_id")
+  invoiceCode        String?                @map("invoice_code")
+  invoiceNo          String                 @map("invoice_no")
+  issuedAt           DateTime               @map("issued_at")
+  sellerName         String                 @map("seller_name")
+  sellerTaxNo        String?                @map("seller_tax_no")
+  buyerName          String?                @map("buyer_name")
+  buyerTaxNo         String?                @map("buyer_tax_no")
+  amountCents        Int                    @map("amount_cents")
+  taxAmountCents     Int                    @default(0) @map("tax_amount_cents")
+  deductibleTaxCents Int                    @default(0) @map("deductible_tax_cents")
+  totalAmountCents   Int                    @map("total_amount_cents")
+  currency           String                 @default("CNY")
+  duplicateStatus    InvoiceDuplicateStatus @default(UNIQUE) @map("duplicate_status")
+  duplicateOfId      String?                @map("duplicate_of_id")
+  createdById        String                 @map("created_by")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  deletedAt          DateTime?              @map("deleted_at")
+  report             ExpenseReport          @relation(fields: [reportId], references: [id])
+  item               ExpenseReportItem?     @relation(fields: [itemId], references: [id])
+  duplicateOf        ExpenseInvoice?        @relation("InvoiceDuplicate", fields: [duplicateOfId], references: [id])
+  duplicates         ExpenseInvoice[]       @relation("InvoiceDuplicate")
+  createdBy          User                   @relation("ExpenseInvoiceCreator", fields: [createdById], references: [id])
 
   @@index([reportId])
   @@index([itemId])
@@ -840,36 +917,175 @@ model ExpenseInvoice {
 }
 
 model ExpenseReportLog {
-  id          String              @id @default(cuid())
-  reportId    String              @map("report_id")
-  operatorId  String              @map("operator_id")
-  action      ExpenseReportAction
-  fromStatus  ExpenseReportStatus? @map("from_status")
-  toStatus    ExpenseReportStatus  @map("to_status")
-  comment     String?
-  createdAt   DateTime            @default(now()) @map("created_at")
-  report      ExpenseReport       @relation(fields: [reportId], references: [id])
-  operator    User                @relation(fields: [operatorId], references: [id])
+  id         String               @id @default(cuid())
+  reportId   String               @map("report_id")
+  operatorId String               @map("operator_id")
+  action     ExpenseReportAction
+  fromStatus ExpenseReportStatus? @map("from_status")
+  toStatus   ExpenseReportStatus  @map("to_status")
+  comment    String?
+  createdAt  DateTime             @default(now()) @map("created_at")
+  report     ExpenseReport        @relation(fields: [reportId], references: [id])
+  operator   User                 @relation(fields: [operatorId], references: [id])
 
   @@index([reportId])
   @@index([operatorId])
   @@map("exp_report_logs")
 }
 
+model GlAccountSubject {
+  id            String             @id @default(cuid())
+  code          String             @unique
+  name          String
+  category      GlAccountCategory
+  normalBalance GlNormalBalance    @map("normal_balance")
+  description   String?
+  status        GlStatus           @default(ACTIVE)
+  createdById   String             @map("created_by")
+  updatedById   String?            @map("updated_by")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  deletedAt     DateTime?          @map("deleted_at")
+  createdBy     User               @relation("GlAccountSubjectCreator", fields: [createdById], references: [id])
+  updatedBy     User?              @relation("GlAccountSubjectUpdater", fields: [updatedById], references: [id])
+  mappings      GlAccountMapping[]
+  voucherLines  GlVoucherLine[]
+
+  @@index([category, status])
+  @@map("gl_account_subjects")
+}
+
+model GlAccountMapping {
+  id                 String                  @id @default(cuid())
+  purpose            GlAccountMappingPurpose
+  expenseTypeCode    String?                 @map("expense_type_code")
+  applicantId        String?                 @map("applicant_id")
+  paymentMethod      PaymentMethod?          @map("payment_method")
+  payerAccount       String?                 @map("payer_account")
+  departmentId       String?                 @map("department_id")
+  costCenterId       String?                 @map("cost_center_id")
+  projectId          String?                 @map("project_id")
+  accountSubjectCode String                  @map("account_subject_code")
+  priority           Int                     @default(100)
+  status             GlStatus                @default(ACTIVE)
+  effectiveFrom      DateTime?               @map("effective_from")
+  effectiveTo        DateTime?               @map("effective_to")
+  createdById        String                  @map("created_by")
+  updatedById        String?                 @map("updated_by")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  deletedAt          DateTime?               @map("deleted_at")
+  accountSubject     GlAccountSubject        @relation(fields: [accountSubjectCode], references: [code])
+  applicant          User?                   @relation(fields: [applicantId], references: [id])
+  department         Department?             @relation(fields: [departmentId], references: [id])
+  costCenter         CostCenter?             @relation(fields: [costCenterId], references: [id])
+  project            Project?                @relation(fields: [projectId], references: [id])
+  createdBy          User                    @relation("GlAccountMappingCreator", fields: [createdById], references: [id])
+  updatedBy          User?                   @relation("GlAccountMappingUpdater", fields: [updatedById], references: [id])
+
+  @@index([purpose, status])
+  @@index([expenseTypeCode])
+  @@index([applicantId])
+  @@index([accountSubjectCode])
+  @@map("gl_account_mappings")
+}
+
+model GlVoucher {
+  id               String          @id @default(cuid())
+  voucherNo        String          @unique @map("voucher_no")
+  voucherType      GlVoucherType   @map("voucher_type")
+  status           GlVoucherStatus @default(DRAFT)
+  reportId         String          @map("report_id")
+  paymentId        String?         @map("payment_id")
+  currency         String          @default("CNY")
+  totalDebitCents  Int             @map("total_debit_cents")
+  totalCreditCents Int             @map("total_credit_cents")
+  summary          String
+  generatedById    String          @map("generated_by")
+  confirmedById    String?         @map("confirmed_by")
+  generatedAt      DateTime        @default(now()) @map("generated_at")
+  confirmedAt      DateTime?       @map("confirmed_at")
+  comment          String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  report           ExpenseReport   @relation(fields: [reportId], references: [id])
+  payment          ExpensePayment? @relation(fields: [paymentId], references: [id])
+  generatedBy      User            @relation("GlVoucherGenerator", fields: [generatedById], references: [id])
+  confirmedBy      User?           @relation("GlVoucherConfirmer", fields: [confirmedById], references: [id])
+  lines            GlVoucherLine[]
+  logs             GlVoucherLog[]
+
+  @@unique([reportId, voucherType, paymentId])
+  @@index([reportId, status])
+  @@index([voucherType, status])
+  @@map("gl_vouchers")
+}
+
+model GlVoucherLine {
+  id                 String                 @id @default(cuid())
+  voucherId          String                 @map("voucher_id")
+  lineNo             Int                    @map("line_no")
+  direction          GlVoucherLineDirection
+  accountSubjectCode String                 @map("account_subject_code")
+  amountCents        Int                    @map("amount_cents")
+  currency           String                 @default("CNY")
+  summary            String
+  reportId           String                 @map("report_id")
+  itemId             String?                @map("item_id")
+  paymentId          String?                @map("payment_id")
+  departmentId       String?                @map("department_id")
+  costCenterId       String?                @map("cost_center_id")
+  projectId          String?                @map("project_id")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  voucher            GlVoucher              @relation(fields: [voucherId], references: [id])
+  accountSubject     GlAccountSubject       @relation(fields: [accountSubjectCode], references: [code])
+  report             ExpenseReport          @relation(fields: [reportId], references: [id])
+  item               ExpenseReportItem?     @relation(fields: [itemId], references: [id])
+  payment            ExpensePayment?        @relation(fields: [paymentId], references: [id])
+  department         Department?            @relation(fields: [departmentId], references: [id])
+  costCenter         CostCenter?            @relation(fields: [costCenterId], references: [id])
+  project            Project?               @relation(fields: [projectId], references: [id])
+
+  @@unique([voucherId, lineNo])
+  @@index([reportId])
+  @@index([itemId])
+  @@index([paymentId])
+  @@index([accountSubjectCode])
+  @@map("gl_voucher_lines")
+}
+
+model GlVoucherLog {
+  id         String           @id @default(cuid())
+  voucherId  String           @map("voucher_id")
+  operatorId String           @map("operator_id")
+  action     GlVoucherAction
+  fromStatus GlVoucherStatus? @map("from_status")
+  toStatus   GlVoucherStatus  @map("to_status")
+  comment    String?
+  metadata   Json?
+  createdAt  DateTime         @default(now()) @map("created_at")
+  voucher    GlVoucher        @relation(fields: [voucherId], references: [id])
+  operator   User             @relation("GlVoucherLogOperator", fields: [operatorId], references: [id])
+
+  @@index([voucherId])
+  @@index([operatorId])
+  @@map("gl_voucher_logs")
+}
+
 model SystemAuditLog {
-  id          String            @id @default(cuid())
-  operatorId  String?           @map("operator_id")
-  actorEmail  String?           @map("actor_email")
-  action      SystemAuditAction
-  entityType  String            @map("entity_type")
-  entityId    String?           @map("entity_id")
-  beforeData  Json?             @map("before_data")
-  afterData   Json?             @map("after_data")
-  metadata    Json?
-  comment     String?
-  success     Boolean           @default(true)
-  createdAt   DateTime          @default(now()) @map("created_at")
-  operator    User?             @relation("SystemAuditOperator", fields: [operatorId], references: [id])
+  id         String            @id @default(cuid())
+  operatorId String?           @map("operator_id")
+  actorEmail String?           @map("actor_email")
+  action     SystemAuditAction
+  entityType String            @map("entity_type")
+  entityId   String?           @map("entity_id")
+  beforeData Json?             @map("before_data")
+  afterData  Json?             @map("after_data")
+  metadata   Json?
+  comment    String?
+  success    Boolean           @default(true)
+  createdAt  DateTime          @default(now()) @map("created_at")
+  operator   User?             @relation("SystemAuditOperator", fields: [operatorId], references: [id])
 
   @@index([operatorId])
   @@index([actorEmail])

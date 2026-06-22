@@ -13,6 +13,7 @@ import { IdentityModule } from './identity/identity.module';
 import { MasterDataModule } from './master-data/master-data.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { VouchersModule } from './vouchers/vouchers.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ApprovalsModule,
     FinanceReviewsModule,
     PaymentsModule,
+    VouchersModule,
   ],
   controllers: [AppController, AuditController],
   providers: [AppService],

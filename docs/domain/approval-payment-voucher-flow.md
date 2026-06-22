@@ -53,6 +53,18 @@
 - 失败付款记录 `exp_payments`，创建失败批次，向报销单状态日志写入 `PAYMENT_FAIL`，并保持报销单为 `FINANCE_APPROVED`，让出纳可以重试。
 - Phase 8 MVP 要求成功付款金额等于剩余可付金额。付款表保留金额/状态字段以便未来支持部分付款，但在实现预算占用拆分前，故意阻断部分成功付款。
 - 付款动作需要 `exp:payment:pay`；查看付款工作台需要 `exp:payment:read`。
+
+## Phase 9 实现说明
+
+- 会计科目主数据使用 `gl_account_subjects`；费用类型、员工往来、进项税和银行付款科目映射使用 `gl_account_mappings`。
+- 已付款报销单通过 `/vouchers/reports/:reportId/preview` 预览凭证草稿，通过 `/vouchers/reports/:reportId/generate` 生成凭证草稿。
+- 凭证数据写入 `gl_vouchers`、`gl_voucher_lines` 和 `gl_voucher_logs`，表名前缀统一为 `gl_`。
+- 只有 `PAID` 且存在成功付款记录的报销单可以生成凭证草稿；生成后报销单流转为 `VOUCHER_DRAFTED`。
+- 报销确认凭证按费用/进项税借方、员工往来贷方生成；付款凭证按员工往来借方、银行付款科目贷方生成。
+- 凭证确认使用 `/vouchers/:id/confirm`，需要 `gl:voucher:confirm` 权限，并在确认前检查借贷平衡。
+- 同一报销单全部凭证草稿确认后，报销单流转为 `VOUCHER_CONFIRMED`。
+- Phase 9 只生成和确认凭证草稿，不自动过账到总账，不对接外部 ERP。
+- 凭证生成、确认、会计科目维护和科目映射维护同步写入 `sys_audit_logs`，并保留报销单状态日志和凭证领域日志。
 ## Acceptance Fix Notes
 
 - If linked invoice total is greater than expense amount, finance review keeps the issue as a warning. On finance approval, the system appends an automatic audit remark explaining that reimbursement, payment, budget occupation, and accounting expense are capped at the approved expense amount; the excess invoice amount is not used as reimbursement basis.
