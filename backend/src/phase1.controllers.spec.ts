@@ -33,15 +33,16 @@ describe('Phase 1 interface controllers', () => {
 
   it('exposes user and role list endpoints', async () => {
     const page = { items: [currentUser], page: 1, pageSize: 20, total: 1 };
+    const request = { user: currentUser } as RequestWithUser;
     const users = new UsersController({ list: async () => page } as never);
     const roles = new RolesController({
       list: async () => ({ items: [{ code: 'ADMIN', name: '系统管理员' }], page: 1, pageSize: 20, total: 1 }),
       permissions: async () => [{ code: 'iam:user:read', name: '查看用户' }],
     } as never);
 
-    await expect(users.list()).resolves.toEqual(page);
-    await expect(roles.list()).resolves.toMatchObject({ total: 1 });
-    await expect(roles.permissions()).resolves.toEqual([{ code: 'iam:user:read', name: '查看用户' }]);
+    await expect(users.list(request)).resolves.toEqual(page);
+    await expect(roles.list(request)).resolves.toMatchObject({ total: 1 });
+    await expect(roles.permissions(request)).resolves.toEqual([{ code: 'iam:user:read', name: '查看用户' }]);
   });
 
   it('exposes master data list endpoints', async () => {

@@ -7,7 +7,9 @@ import {
   BudgetStatus,
   ExpenseReportStatus,
   Prisma,
+  SystemAuditAction,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
@@ -41,7 +43,10 @@ type ReportBudgetItem = {
 
 @Injectable()
 export class BudgetsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async list(user: AuthenticatedUser, query: BudgetListQueryDto): Promise<PageResult<unknown>> {
     this.ensurePermission(user, 'exp:budget:read');
@@ -71,69 +76,114 @@ export class BudgetsService {
   create(user: AuthenticatedUser, dto: CreateBudgetDto) {
     this.ensurePermission(user, 'exp:budget:write');
     this.validateBudgetAmount(dto.totalCents);
-    return this.prisma.budget.create({
-      data: {
-        code: dto.code.trim().toUpperCase(),
-        name: dto.name,
-        fiscalPeriod: dto.fiscalPeriod,
-        departmentId: dto.departmentId,
-        costCenterId: dto.costCenterId,
-        projectId: dto.projectId,
-        expenseTypeCode: dto.expenseTypeCode?.trim().toUpperCase(),
-        accountSubjectCode: dto.accountSubjectCode?.trim(),
-        currency: dto.currency ?? 'CNY',
-        totalCents: dto.totalCents,
-        warningThresholdBps: dto.warningThresholdBps ?? 9000,
-        controlMode: dto.controlMode ?? BudgetControlMode.WARNING,
-        createdById: user.id,
-      },
-      select: this.budgetSelect(),
+    return this.prisma.$transaction(async (tx) => {
+      const budget = await tx.budget.create({
+        data: {
+          code: dto.code.trim().toUpperCase(),
+          name: dto.name,
+          fiscalPeriod: dto.fiscalPeriod,
+          departmentId: dto.departmentId,
+          costCenterId: dto.costCenterId,
+          projectId: dto.projectId,
+          expenseTypeCode: dto.expenseTypeCode?.trim().toUpperCase(),
+          accountSubjectCode: dto.accountSubjectCode?.trim(),
+          currency: dto.currency ?? 'CNY',
+          totalCents: dto.totalCents,
+          warningThresholdBps: dto.warningThresholdBps ?? 9000,
+          controlMode: dto.controlMode ?? BudgetControlMode.WARNING,
+          createdById: user.id,
+        },
+        select: this.budgetSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.BUDGET_CREATE,
+        entityType: 'budget',
+        entityId: budget.id,
+        after: this.auditBudget(budget),
+      });
+      return budget;
     });
   }
 
   async update(user: AuthenticatedUser, id: string, dto: UpdateBudgetDto) {
     this.ensurePermission(user, 'exp:budget:write');
-    const existing = await this.prisma.budget.findFirst({ where: { id, deletedAt: null }, select: { id: true, totalCents: true } });
+    const existing = await this.prisma.budget.findFirst({ where: { id, deletedAt: null }, select: this.budgetSelect() });
     if (!existing) {
       throw new NotFoundException('预算不存在');
     }
     if (dto.totalCents !== undefined) {
       this.validateBudgetAmount(dto.totalCents);
     }
-    return this.prisma.budget.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        departmentId: dto.departmentId,
-        costCenterId: dto.costCenterId,
-        projectId: dto.projectId,
-        expenseTypeCode: dto.expenseTypeCode?.trim().toUpperCase(),
-        accountSubjectCode: dto.accountSubjectCode?.trim(),
-        totalCents: dto.totalCents,
-        warningThresholdBps: dto.warningThresholdBps,
-        controlMode: dto.controlMode,
-        status: dto.status,
-        updatedById: user.id,
-      },
-      select: this.budgetSelect(),
+    return this.prisma.$transaction(async (tx) => {
+      const budget = await tx.budget.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          departmentId: dto.departmentId,
+          costCenterId: dto.costCenterId,
+          projectId: dto.projectId,
+          expenseTypeCode: dto.expenseTypeCode?.trim().toUpperCase(),
+          accountSubjectCode: dto.accountSubjectCode?.trim(),
+          totalCents: dto.totalCents,
+          warningThresholdBps: dto.warningThresholdBps,
+          controlMode: dto.controlMode,
+          status: dto.status,
+          updatedById: user.id,
+        },
+        select: this.budgetSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.BUDGET_UPDATE,
+        entityType: 'budget',
+        entityId: id,
+        before: this.auditBudget(existing),
+        after: this.auditBudget(budget),
+      });
+      return budget;
     });
   }
 
-  disable(user: AuthenticatedUser, id: string) {
+  async disable(user: AuthenticatedUser, id: string) {
     this.ensurePermission(user, 'exp:budget:write');
-    return this.prisma.budget.update({
-      where: { id },
-      data: { status: BudgetStatus.DISABLED, updatedById: user.id },
-      select: this.budgetSelect(),
+    const before = await this.ensureBudget(id);
+    return this.prisma.$transaction(async (tx) => {
+      const budget = await tx.budget.update({
+        where: { id },
+        data: { status: BudgetStatus.DISABLED, updatedById: user.id },
+        select: this.budgetSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.BUDGET_DISABLE,
+        entityType: 'budget',
+        entityId: id,
+        before: this.auditBudget(before),
+        after: this.auditBudget(budget),
+      });
+      return budget;
     });
   }
 
-  enable(user: AuthenticatedUser, id: string) {
+  async enable(user: AuthenticatedUser, id: string) {
     this.ensurePermission(user, 'exp:budget:write');
-    return this.prisma.budget.update({
-      where: { id },
-      data: { status: BudgetStatus.ACTIVE, deletedAt: null, updatedById: user.id },
-      select: this.budgetSelect(),
+    const before = await this.ensureBudget(id, true);
+    return this.prisma.$transaction(async (tx) => {
+      const budget = await tx.budget.update({
+        where: { id },
+        data: { status: BudgetStatus.ACTIVE, deletedAt: null, updatedById: user.id },
+        select: this.budgetSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.BUDGET_ENABLE,
+        entityType: 'budget',
+        entityId: id,
+        before: this.auditBudget(before),
+        after: this.auditBudget(budget),
+      });
+      return budget;
     });
   }
 
@@ -524,6 +574,57 @@ export class BudgetsService {
     if (!user.permissions.includes(permission)) {
       throw new ForbiddenException('缺少预算操作权限');
     }
+  }
+
+  private async ensureBudget(id: string, includeDeleted = false) {
+    const budget = await this.prisma.budget.findFirst({
+      where: { id, deletedAt: includeDeleted ? undefined : null },
+      select: this.budgetSelect(),
+    });
+    if (!budget) {
+      throw new NotFoundException('预算不存在');
+    }
+    return budget;
+  }
+
+  private auditBudget(budget: {
+    id: string;
+    code: string;
+    name: string;
+    fiscalPeriod: string;
+    departmentId: string | null;
+    costCenterId: string | null;
+    projectId: string | null;
+    expenseTypeCode: string | null;
+    accountSubjectCode: string | null;
+    currency: string;
+    totalCents: number;
+    inTransitCents: number;
+    approvedCents: number;
+    actualCents: number;
+    warningThresholdBps: number;
+    controlMode: string;
+    status: string;
+  }) {
+    return {
+      id: budget.id,
+      code: budget.code,
+      name: budget.name,
+      fiscalPeriod: budget.fiscalPeriod,
+      departmentId: budget.departmentId,
+      costCenterId: budget.costCenterId,
+      projectId: budget.projectId,
+      expenseTypeCode: budget.expenseTypeCode,
+      accountSubjectCode: budget.accountSubjectCode,
+      currency: budget.currency,
+      totalCents: budget.totalCents,
+      inTransitCents: budget.inTransitCents,
+      approvedCents: budget.approvedCents,
+      actualCents: budget.actualCents,
+      warningThresholdBps: budget.warningThresholdBps,
+      controlMode: budget.controlMode,
+      status: budget.status,
+    };
   }
 
   private budgetSnapshotSelect() {

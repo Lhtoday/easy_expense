@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { CurrentUserGuard } from './current-user.guard';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { CurrentUserGuard, RequestWithUser } from './current-user.guard';
 import { CreateUserDto, UpdateUserDto } from './user.dto';
 import { UsersService } from './users.service';
 
@@ -9,22 +9,22 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  list(@Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('keyword') keyword?: string) {
-    return this.usersService.list(Number(page ?? 1), Number(pageSize ?? 20), keyword);
+  list(@Req() request: RequestWithUser, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('keyword') keyword?: string) {
+    return this.usersService.list(request.user, Number(page ?? 1), Number(pageSize ?? 20), keyword);
   }
 
   @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  create(@Req() request: RequestWithUser, @Body() dto: CreateUserDto) {
+    return this.usersService.create(request.user, dto);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  update(@Req() request: RequestWithUser, @Param('id') id: string, @Body() dto: UpdateUserDto) {
+    return this.usersService.update(request.user, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  remove(@Req() request: RequestWithUser, @Param('id') id: string) {
+    return this.usersService.remove(request.user, id);
   }
 }

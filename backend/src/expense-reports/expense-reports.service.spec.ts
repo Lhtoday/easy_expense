@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ApprovalFlowConfigStatus, ExpenseAttachmentCategory, ExpenseReportStatus } from '@prisma/client';
+import { Readable } from 'stream';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { ExpenseReportsService } from './expense-reports.service';
@@ -323,7 +324,39 @@ describe('ExpenseReportsService', () => {
 
   it('blocks opening attachments without attachment read permission', async () => {
     const service = new ExpenseReportsService({} as never, {} as never);
-    await expect(service.openAttachment({ ...user, permissions: ['exp:report:read'] }, 'report_1', 'att_1')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.openAttachment({ ...user, permissions: ['exp:report:read'] }, 'report_1', 'att_1', 'DOWNLOAD')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('records attachment download access audit', async () => {
+    const prisma = {
+      expenseAttachment: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'att_1',
+          fileName: 'invoice.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 5,
+          storageBucket: 'expenseflow-files',
+          storageKey: 'expense-reports/report_1/invoice.pdf',
+          category: ExpenseAttachmentCategory.INVOICE_IMAGE,
+        }),
+      },
+    };
+    const storage = { getObject: vi.fn().mockResolvedValue({ stream: Readable.from(['hello']) }) };
+    const audit = { record: vi.fn().mockResolvedValue({ id: 'audit_1' }) };
+    const service = new ExpenseReportsService(prisma as never, storage as never, undefined, undefined, audit as never);
+
+    await expect(service.openAttachment(user, 'report_1', 'att_1', 'DOWNLOAD')).resolves.toMatchObject({
+      attachment: { id: 'att_1', fileName: 'invoice.pdf' },
+    });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operator: user,
+        action: 'ATTACHMENT_DOWNLOAD',
+        entityType: 'expense-attachment',
+        entityId: 'att_1',
+        metadata: expect.objectContaining({ reportId: 'report_1', category: ExpenseAttachmentCategory.INVOICE_IMAGE }),
+      }),
+    );
   });
 
   it('marks invoice metadata as duplicate when key fields already exist', async () => {

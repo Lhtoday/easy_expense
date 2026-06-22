@@ -9,8 +9,10 @@ import {
   ExpenseReportStatus,
   InvoiceDuplicateStatus,
   Prisma,
+  SystemAuditAction,
   UserStatus,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { BudgetsService } from '../budgets/budgets.service';
 import { ExpensePoliciesService } from '../expense-policies/expense-policies.service';
 import { AuthenticatedUser } from '../identity/identity.types';
@@ -33,6 +35,7 @@ export class ExpenseReportsService {
     @Optional() private readonly storage?: MinioStorageService,
     @Optional() private readonly expensePolicies?: ExpensePoliciesService,
     @Optional() private readonly budgets?: BudgetsService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
   async list(user: AuthenticatedUser, query: ExpenseReportListQueryDto): Promise<PageResult<unknown>> {
@@ -322,7 +325,7 @@ export class ExpenseReportsService {
     });
   }
 
-  async openAttachment(user: AuthenticatedUser, reportId: string, attachmentId: string) {
+  async openAttachment(user: AuthenticatedUser, reportId: string, attachmentId: string, accessAction: 'PREVIEW' | 'DOWNLOAD') {
     this.ensurePermission(user, 'exp:attachment:read');
     if (!this.storage) {
       throw new BadRequestException('文件存储服务未配置');
@@ -337,6 +340,7 @@ export class ExpenseReportsService {
         sizeBytes: true,
         storageBucket: true,
         storageKey: true,
+        category: true,
       },
     });
     if (!attachment) {
@@ -344,6 +348,19 @@ export class ExpenseReportsService {
     }
 
     const object = await this.runStorageOperation(() => this.storage!.getObject(attachment.storageBucket, attachment.storageKey));
+    await this.audit?.record({
+      operator: user,
+      action: accessAction === 'PREVIEW' ? SystemAuditAction.ATTACHMENT_PREVIEW : SystemAuditAction.ATTACHMENT_DOWNLOAD,
+      entityType: 'expense-attachment',
+      entityId: attachment.id,
+      metadata: {
+        reportId,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        category: attachment.category,
+      },
+    });
     return { attachment, stream: object.stream };
   }
 

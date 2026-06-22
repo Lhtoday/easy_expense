@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { UserStatus } from '@prisma/client';
+import { SystemAuditAction, UserStatus } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './auth.dto';
 import { AuthenticatedUser, DEFAULT_PERMISSIONS } from './identity.types';
@@ -10,7 +11,10 @@ const ADMIN_PASSWORD = 'Admin123!';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async login(dto: LoginDto) {
     await this.ensureBootstrapAdmin();
@@ -20,10 +24,28 @@ export class AuthService {
     });
 
     if (!user || user.status !== UserStatus.ACTIVE || user.passwordHash !== this.hashPassword(dto.password)) {
+      await this.audit.record({
+        operatorId: user?.id,
+        actorEmail: dto.email,
+        action: SystemAuditAction.LOGIN_FAILURE,
+        entityType: 'auth-session',
+        entityId: user?.id,
+        metadata: {
+          reason: !user ? 'USER_NOT_FOUND' : user.status !== UserStatus.ACTIVE ? 'USER_DISABLED' : 'BAD_CREDENTIALS',
+        },
+        success: false,
+      });
       throw new UnauthorizedException('邮箱或密码不正确');
     }
 
     const currentUser = this.toCurrentUser(user);
+    await this.audit.record({
+      operator: currentUser,
+      action: SystemAuditAction.LOGIN_SUCCESS,
+      entityType: 'auth-session',
+      entityId: currentUser.id,
+      metadata: { roleCodes: currentUser.roles.map((role) => role.code) },
+    });
     return {
       accessToken: this.signToken(currentUser.id),
       user: currentUser,
@@ -37,6 +59,15 @@ export class AuthService {
     });
 
     if (!user || user.status !== UserStatus.ACTIVE) {
+      await this.audit.record({
+        operatorId: userId,
+        actorEmail: user?.email,
+        action: SystemAuditAction.TOKEN_INVALID,
+        entityType: 'auth-token',
+        entityId: userId,
+        metadata: { reason: !user ? 'USER_NOT_FOUND' : 'USER_DISABLED' },
+        success: false,
+      });
       throw new UnauthorizedException('用户不可用');
     }
 
@@ -44,10 +75,18 @@ export class AuthService {
   }
 
   async verifyToken(token: string) {
-    const decoded = Buffer.from(token, 'base64url').toString('utf8');
-    const [userId, signature] = decoded.split('.');
+    let userId: string | undefined;
+    let signature: string | undefined;
+    try {
+      const decoded = Buffer.from(token, 'base64url').toString('utf8');
+      [userId, signature] = decoded.split('.');
+    } catch {
+      await this.recordInvalidToken('TOKEN_DECODE_FAILED');
+      throw new UnauthorizedException('访问令牌无效');
+    }
 
     if (!userId || signature !== this.signUserId(userId)) {
+      await this.recordInvalidToken(!userId ? 'TOKEN_MISSING_USER' : 'TOKEN_SIGNATURE_MISMATCH', userId);
       throw new UnauthorizedException('访问令牌无效');
     }
 
@@ -64,6 +103,17 @@ export class AuthService {
 
   private signUserId(userId: string) {
     return createHash('sha256').update(`phase1:${userId}`).digest('hex');
+  }
+
+  private recordInvalidToken(reason: string, userId?: string) {
+    return this.audit.record({
+      operatorId: userId,
+      action: SystemAuditAction.TOKEN_INVALID,
+      entityType: 'auth-token',
+      entityId: userId,
+      metadata: { reason },
+      success: false,
+    });
   }
 
   private toCurrentUser(user: {

@@ -77,7 +77,7 @@ export class ExpenseReportsController {
     @Param('attachmentId') attachmentId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const { attachment, stream } = await this.service.openAttachment(request.user, id, attachmentId);
+    const { attachment, stream } = await this.service.openAttachment(request.user, id, attachmentId, 'DOWNLOAD');
     response.setHeader('Content-Type', attachment.mimeType);
     response.setHeader('Content-Length', String(attachment.sizeBytes));
     response.setHeader('Content-Disposition', this.contentDisposition('attachment', attachment.fileName));
@@ -91,7 +91,7 @@ export class ExpenseReportsController {
     @Param('attachmentId') attachmentId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const { attachment, stream } = await this.service.openAttachment(request.user, id, attachmentId);
+    const { attachment, stream } = await this.service.openAttachment(request.user, id, attachmentId, 'PREVIEW');
     response.setHeader('Content-Type', attachment.mimeType);
     response.setHeader('Content-Length', String(attachment.sizeBytes));
     response.setHeader('Content-Disposition', this.contentDisposition('inline', attachment.fileName));

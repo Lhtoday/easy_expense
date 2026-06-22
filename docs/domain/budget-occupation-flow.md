@@ -29,6 +29,7 @@ ExpenseFlow 预算区分在途占用、已审批占用和实际发生金额。
 - 预算占用存储在 `bud_occupations`。
 - 提交时预算检查痕迹存储在 `bud_checks`。
 - 预算变动审计日志存储在 `bud_operation_logs`。
+- 预算主数据创建、修改、启用和停用的配置审计存储在 `sys_audit_logs`，记录预算维度、总额、阈值、控制模式和金额桶 before/after。
 - 从 Phase 7 开始拆分业务审批和财务审核，因此业务审批通过后占用仍保持在途，财务审核通过后才确认到已审批占用。
 - `BudgetsService.transferActual` 预留给 Phase 8 付款集成，用于将已审批占用转为实际发生。
 - 缺少匹配预算记录时创建提醒痕迹，不阻断提交。

@@ -178,6 +178,39 @@ enum BudgetCheckResult {
   BLOCK
 }
 
+enum SystemAuditAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  TOKEN_INVALID
+  USER_CREATE
+  USER_UPDATE
+  USER_DISABLE
+  USER_ROLE_UPDATE
+  ROLE_CREATE
+  ROLE_UPDATE
+  ROLE_DISABLE
+  ROLE_PERMISSION_UPDATE
+  ATTACHMENT_PREVIEW
+  ATTACHMENT_DOWNLOAD
+  BUDGET_CREATE
+  BUDGET_UPDATE
+  BUDGET_ENABLE
+  BUDGET_DISABLE
+  EXPENSE_TYPE_CREATE
+  EXPENSE_TYPE_UPDATE
+  EXPENSE_TYPE_DISABLE
+  POLICY_CREATE
+  POLICY_UPDATE
+  POLICY_DISABLE
+  POLICY_RULE_CREATE
+  POLICY_RULE_UPDATE
+  POLICY_RULE_DISABLE
+  VOUCHER_DRAFT_GENERATE
+  VOUCHER_REGENERATE
+  VOUCHER_CONFIRM
+  VOUCHER_VOID
+}
+
 model User {
   id             String             @id @default(cuid())
   employeeNo     String             @unique @map("employee_no")
@@ -206,6 +239,7 @@ model User {
   operatedFinanceReviews ExpenseFinanceReview[] @relation("FinanceReviewOperator")
   operatedPaymentBatches ExpensePaymentBatch[] @relation("PaymentBatchOperator")
   operatedPayments       ExpensePayment[]      @relation("PaymentOperator")
+  systemAuditLogs         SystemAuditLog[]      @relation("SystemAuditOperator")
 
   @@map("iam_users")
 }
@@ -820,4 +854,27 @@ model ExpenseReportLog {
   @@index([reportId])
   @@index([operatorId])
   @@map("exp_report_logs")
+}
+
+model SystemAuditLog {
+  id          String            @id @default(cuid())
+  operatorId  String?           @map("operator_id")
+  actorEmail  String?           @map("actor_email")
+  action      SystemAuditAction
+  entityType  String            @map("entity_type")
+  entityId    String?           @map("entity_id")
+  beforeData  Json?             @map("before_data")
+  afterData   Json?             @map("after_data")
+  metadata    Json?
+  comment     String?
+  success     Boolean           @default(true)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  operator    User?             @relation("SystemAuditOperator", fields: [operatorId], references: [id])
+
+  @@index([operatorId])
+  @@index([actorEmail])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("sys_audit_logs")
 }

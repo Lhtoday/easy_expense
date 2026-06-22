@@ -5,7 +5,9 @@ import {
   ExpensePolicyStatus,
   MasterDataStatus,
   Prisma,
+  SystemAuditAction,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
@@ -30,7 +32,10 @@ type PolicyFinding = {
 
 @Injectable()
 export class ExpensePoliciesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async listExpenseTypes(user: AuthenticatedUser, query: ExpensePolicyListQueryDto): Promise<PageResult<unknown>> {
     this.ensurePermission(user, 'exp:policy:read');
@@ -58,32 +63,66 @@ export class ExpensePoliciesService {
 
   createExpenseType(user: AuthenticatedUser, dto: CreateExpenseTypeDto) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expenseType.create({
-      data: {
-        code: dto.code.trim().toUpperCase(),
-        name: dto.name,
-        description: dto.description,
-        defaultAccountSubjectCode: dto.defaultAccountSubjectCode,
-      },
-      select: this.expenseTypeSelect(),
+    return this.prisma.$transaction(async (tx) => {
+      const expenseType = await tx.expenseType.create({
+        data: {
+          code: dto.code.trim().toUpperCase(),
+          name: dto.name,
+          description: dto.description,
+          defaultAccountSubjectCode: dto.defaultAccountSubjectCode,
+        },
+        select: this.expenseTypeSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.EXPENSE_TYPE_CREATE,
+        entityType: 'expense-type',
+        entityId: expenseType.id,
+        after: expenseType,
+      });
+      return expenseType;
     });
   }
 
-  updateExpenseType(user: AuthenticatedUser, id: string, dto: UpdateExpenseTypeDto) {
+  async updateExpenseType(user: AuthenticatedUser, id: string, dto: UpdateExpenseTypeDto) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expenseType.update({
-      where: { id },
-      data: dto,
-      select: this.expenseTypeSelect(),
+    const before = await this.ensureExpenseTypeById(id);
+    return this.prisma.$transaction(async (tx) => {
+      const expenseType = await tx.expenseType.update({
+        where: { id },
+        data: dto,
+        select: this.expenseTypeSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.EXPENSE_TYPE_UPDATE,
+        entityType: 'expense-type',
+        entityId: id,
+        before,
+        after: expenseType,
+      });
+      return expenseType;
     });
   }
 
-  disableExpenseType(user: AuthenticatedUser, id: string) {
+  async disableExpenseType(user: AuthenticatedUser, id: string) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expenseType.update({
-      where: { id },
-      data: { status: MasterDataStatus.DISABLED, deletedAt: new Date() },
-      select: this.expenseTypeSelect(),
+    const before = await this.ensureExpenseTypeById(id);
+    return this.prisma.$transaction(async (tx) => {
+      const expenseType = await tx.expenseType.update({
+        where: { id },
+        data: { status: MasterDataStatus.DISABLED, deletedAt: new Date() },
+        select: this.expenseTypeSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.EXPENSE_TYPE_DISABLE,
+        entityType: 'expense-type',
+        entityId: id,
+        before,
+        after: expenseType,
+      });
+      return expenseType;
     });
   }
 
@@ -113,39 +152,73 @@ export class ExpensePoliciesService {
 
   createPolicy(user: AuthenticatedUser, dto: CreateExpensePolicyDto) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expensePolicy.create({
-      data: {
-        code: dto.code.trim().toUpperCase(),
-        name: dto.name,
-        description: dto.description,
-        effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
-        effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
-      },
-      select: this.policySelect(),
+    return this.prisma.$transaction(async (tx) => {
+      const policy = await tx.expensePolicy.create({
+        data: {
+          code: dto.code.trim().toUpperCase(),
+          name: dto.name,
+          description: dto.description,
+          effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
+          effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
+        },
+        select: this.policySelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.POLICY_CREATE,
+        entityType: 'expense-policy',
+        entityId: policy.id,
+        after: policy,
+      });
+      return policy;
     });
   }
 
-  updatePolicy(user: AuthenticatedUser, id: string, dto: UpdateExpensePolicyDto) {
+  async updatePolicy(user: AuthenticatedUser, id: string, dto: UpdateExpensePolicyDto) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expensePolicy.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        description: dto.description,
-        status: dto.status,
-        effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
-        effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
-      },
-      select: this.policySelect(),
+    const before = await this.ensurePolicy(id);
+    return this.prisma.$transaction(async (tx) => {
+      const policy = await tx.expensePolicy.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          description: dto.description,
+          status: dto.status,
+          effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
+          effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : undefined,
+        },
+        select: this.policySelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.POLICY_UPDATE,
+        entityType: 'expense-policy',
+        entityId: id,
+        before,
+        after: policy,
+      });
+      return policy;
     });
   }
 
-  disablePolicy(user: AuthenticatedUser, id: string) {
+  async disablePolicy(user: AuthenticatedUser, id: string) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expensePolicy.update({
-      where: { id },
-      data: { status: ExpensePolicyStatus.DISABLED, deletedAt: new Date() },
-      select: this.policySelect(),
+    const before = await this.ensurePolicy(id);
+    return this.prisma.$transaction(async (tx) => {
+      const policy = await tx.expensePolicy.update({
+        where: { id },
+        data: { status: ExpensePolicyStatus.DISABLED, deletedAt: new Date() },
+        select: this.policySelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.POLICY_DISABLE,
+        entityType: 'expense-policy',
+        entityId: id,
+        before,
+        after: policy,
+      });
+      return policy;
     });
   }
 
@@ -153,9 +226,19 @@ export class ExpensePoliciesService {
     this.ensurePermission(user, 'exp:policy:write');
     await this.ensurePolicy(policyId);
     await this.ensureExpenseType(dto.expenseTypeCode);
-    return this.prisma.expensePolicyRule.create({
-      data: this.ruleData(policyId, dto),
-      select: this.ruleSelect(),
+    return this.prisma.$transaction(async (tx) => {
+      const rule = await tx.expensePolicyRule.create({
+        data: this.ruleData(policyId, dto),
+        select: this.ruleSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.POLICY_RULE_CREATE,
+        entityType: 'expense-policy-rule',
+        entityId: rule.id,
+        after: { ...rule, policyId },
+      });
+      return rule;
     });
   }
 
@@ -163,31 +246,55 @@ export class ExpensePoliciesService {
     this.ensurePermission(user, 'exp:policy:write');
     await this.ensurePolicy(policyId);
     await this.ensureExpenseType(dto.expenseTypeCode);
-    return this.prisma.expensePolicyRule.update({
-      where: { id: ruleId },
-      data: {
-        code: dto.code?.trim().toUpperCase(),
-        name: dto.name,
-        description: dto.description,
-        expenseTypeCode: dto.expenseTypeCode,
-        city: dto.city,
-        jobLevel: dto.jobLevel,
-        maxAmountCents: dto.maxAmountCents,
-        requiresInvoice: dto.requiresInvoice,
-        requiresPreApproval: dto.requiresPreApproval,
-        action: dto.action,
-        status: dto.status,
-      },
-      select: this.ruleSelect(),
+    const before = await this.ensureRule(policyId, ruleId);
+    return this.prisma.$transaction(async (tx) => {
+      const rule = await tx.expensePolicyRule.update({
+        where: { id: ruleId },
+        data: {
+          code: dto.code?.trim().toUpperCase(),
+          name: dto.name,
+          description: dto.description,
+          expenseTypeCode: dto.expenseTypeCode,
+          city: dto.city,
+          jobLevel: dto.jobLevel,
+          maxAmountCents: dto.maxAmountCents,
+          requiresInvoice: dto.requiresInvoice,
+          requiresPreApproval: dto.requiresPreApproval,
+          action: dto.action,
+          status: dto.status,
+        },
+        select: this.ruleSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.POLICY_RULE_UPDATE,
+        entityType: 'expense-policy-rule',
+        entityId: ruleId,
+        before: { ...before, policyId },
+        after: { ...rule, policyId },
+      });
+      return rule;
     });
   }
 
-  disableRule(user: AuthenticatedUser, policyId: string, ruleId: string) {
+  async disableRule(user: AuthenticatedUser, policyId: string, ruleId: string) {
     this.ensurePermission(user, 'exp:policy:write');
-    return this.prisma.expensePolicyRule.update({
-      where: { id: ruleId, policyId },
-      data: { status: ExpensePolicyStatus.DISABLED },
-      select: this.ruleSelect(),
+    const before = await this.ensureRule(policyId, ruleId);
+    return this.prisma.$transaction(async (tx) => {
+      const rule = await tx.expensePolicyRule.update({
+        where: { id: ruleId, policyId },
+        data: { status: ExpensePolicyStatus.DISABLED },
+        select: this.ruleSelect(),
+      });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.POLICY_RULE_DISABLE,
+        entityType: 'expense-policy-rule',
+        entityId: ruleId,
+        before: { ...before, policyId },
+        after: { ...rule, policyId },
+      });
+      return rule;
     });
   }
 
@@ -339,10 +446,27 @@ export class ExpensePoliciesService {
   }
 
   private async ensurePolicy(policyId: string) {
-    const policy = await this.prisma.expensePolicy.findFirst({ where: { id: policyId, deletedAt: null }, select: { id: true } });
+    const policy = await this.prisma.expensePolicy.findFirst({ where: { id: policyId, deletedAt: null }, select: this.policySelect() });
     if (!policy) {
       throw new NotFoundException('费用政策不存在');
     }
+    return policy;
+  }
+
+  private async ensureRule(policyId: string, ruleId: string) {
+    const rule = await this.prisma.expensePolicyRule.findFirst({ where: { id: ruleId, policyId }, select: this.ruleSelect() });
+    if (!rule) {
+      throw new NotFoundException('费用政策规则不存在');
+    }
+    return rule;
+  }
+
+  private async ensureExpenseTypeById(id: string) {
+    const expenseType = await this.prisma.expenseType.findFirst({ where: { id, deletedAt: null }, select: this.expenseTypeSelect() });
+    if (!expenseType) {
+      throw new NotFoundException('费用类型不存在');
+    }
+    return expenseType;
   }
 
   private async ensureExpenseType(expenseTypeCode?: string) {
@@ -383,6 +507,7 @@ export class ExpensePoliciesService {
       status: true,
       defaultAccountSubjectCode: true,
       createdAt: true,
+      deletedAt: true,
     } satisfies Prisma.ExpenseTypeSelect;
   }
 
@@ -396,6 +521,7 @@ export class ExpensePoliciesService {
       effectiveFrom: true,
       effectiveTo: true,
       createdAt: true,
+      deletedAt: true,
       rules: { orderBy: { createdAt: 'asc' }, select: this.ruleSelect() },
     } satisfies Prisma.ExpensePolicySelect;
   }

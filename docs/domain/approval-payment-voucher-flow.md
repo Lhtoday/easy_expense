@@ -30,6 +30,9 @@
 - 凭证确认
 - 预算调整
 - 权限或角色变更
+- 登录成功、关键登录失败和无效 token 校验失败
+- 附件预览和下载
+- 预算主数据、费用类型、费用政策和政策规则配置变更
 
 ## Phase 7 实现说明
 
@@ -53,3 +56,10 @@
 ## Acceptance Fix Notes
 
 - If linked invoice total is greater than expense amount, finance review keeps the issue as a warning. On finance approval, the system appends an automatic audit remark explaining that reimbursement, payment, budget occupation, and accounting expense are capped at the approved expense amount; the excess invoice amount is not used as reimbursement basis.
+
+## 审计追溯加固实现说明
+
+- 2026-06-22 起，身份权限、认证安全、附件访问、预算主数据和费用政策配置类审计统一写入 `sys_audit_logs`。
+- 审计记录使用 `SystemAuditAction` 区分动作，保留操作者、操作者邮箱、对象类型、对象 id、before/after 结构化快照、metadata、备注和成功状态。
+- `GET /audit-logs` 提供后端审计查询入口，需要 `sys:audit:read` 权限。
+- 凭证相关动作已在 `SystemAuditAction` 中预留 `VOUCHER_DRAFT_GENERATE`、`VOUCHER_REGENERATE`、`VOUCHER_CONFIRM` 和 `VOUCHER_VOID`，Phase 9 实现时必须把凭证生成依据和借贷明细快照写入审计或凭证领域日志。

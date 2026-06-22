@@ -16,6 +16,60 @@ const budgetUser: AuthenticatedUser = {
 };
 
 describe('BudgetsService paid report reconciliation', () => {
+  it('records budget master-data creation audit', async () => {
+    const budget = {
+      id: 'budget_1',
+      code: 'BUD202606',
+      name: 'June budget',
+      fiscalPeriod: '2026-06',
+      departmentId: null,
+      costCenterId: null,
+      projectId: null,
+      expenseTypeCode: 'TRAVEL',
+      accountSubjectCode: '660201',
+      currency: 'CNY',
+      totalCents: 100000,
+      inTransitCents: 0,
+      approvedCents: 0,
+      actualCents: 0,
+      warningThresholdBps: 9000,
+      controlMode: BudgetControlMode.WARNING,
+      status: 'ACTIVE',
+      createdAt: new Date('2026-06-22T00:00:00.000Z'),
+      department: null,
+      costCenter: null,
+      project: null,
+      createdBy: { id: budgetUser.id, name: budgetUser.name },
+      updatedBy: null,
+      logs: [],
+    };
+    const tx = { budget: { create: vi.fn().mockResolvedValue(budget) } };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue({ id: 'audit_1' }) };
+    const service = new BudgetsService(prisma as never, audit as never);
+
+    await expect(
+      service.create(budgetUser, {
+        code: 'BUD202606',
+        name: 'June budget',
+        fiscalPeriod: '2026-06',
+        expenseTypeCode: 'TRAVEL',
+        accountSubjectCode: '660201',
+        totalCents: 100000,
+      }),
+    ).resolves.toEqual(budget);
+    expect(audit.recordWithClient).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        operator: budgetUser,
+        action: 'BUDGET_CREATE',
+        entityType: 'budget',
+        entityId: 'budget_1',
+        after: expect.objectContaining({ totalCents: 100000, expenseTypeCode: 'TRAVEL' }),
+      }),
+    );
+  });
+
   it('only reconciles paid reports', async () => {
     const tx = {
       expenseReport: {

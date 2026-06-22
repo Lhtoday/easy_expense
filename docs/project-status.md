@@ -223,6 +223,7 @@
 
 - 文档应按 UTF-8 编码读取和编辑。若 PowerShell 默认输出出现乱码，优先使用 `Get-Content -Encoding UTF8` 验证文件内容，不要直接按乱码结果重写业务事实。
 - 端到端验收剧本见 `docs/e2e-acceptance-script.md`。
+- 2026-06-22：完成审计追溯加固首批实现。新增 `sys_audit_logs` 和 `SystemAuditAction`，补齐用户/角色/权限变更、登录成功与失败、无效 token、附件预览下载、预算主数据、费用类型和费用政策配置变更审计；新增 `GET /audit-logs` 查询入口和 `sys:audit:read` 权限。验证完成：Prisma generate、migration deploy/status、后端 test/lint/build、前端 lint/build。
 - 2026-06-21：记录下一开发任务 `docs/tasks/audit-traceability-hardening.md`。明天优先加固审计追溯能力，重点覆盖权限/角色变更、登录审计、附件预览下载审计、预算主数据和费用政策配置变更审计，并为 Phase 9 凭证草稿的生成、确认和重生成审计预留设计。
 - 2026-06-18：完成文档治理增强。新增端到端验收剧本，补充 Phase 9 凭证草稿、核心流程验收和文档治理任务卡；将 `docs` 中主要说明文档中文化，保留命令、路径、枚举、权限码和 API 路径等机器可识别内容。
 - 2026-06-18：完成 `.codex/skills/expenseflow-*` 技能改造。技能说明改为英文专家库风格，强化触发描述、核心工作流、财务合规 guardrails、验证启发和输出要求；`quick_validate.py` 已确认 8 个 ExpenseFlow 技能有效。
