@@ -23,6 +23,7 @@ import {
   CreateAccountSubjectDto,
   UpdateAccountMappingDto,
   UpdateAccountSubjectDto,
+  VoucherReportListQueryDto,
 } from './voucher.dto';
 
 type VoucherLineDraft = {
@@ -232,6 +233,48 @@ export class VouchersService {
     return { reportId, reportNo: report.reportNo, vouchers };
   }
 
+  async listReports(user: AuthenticatedUser, query: VoucherReportListQueryDto): Promise<PageResult<unknown>> {
+    this.ensurePermission(user, 'gl:voucher:read');
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const where: Prisma.ExpenseReportWhereInput = {
+      deletedAt: null,
+      status: query.status ?? { in: [ExpenseReportStatus.PAID, ExpenseReportStatus.VOUCHER_DRAFTED, ExpenseReportStatus.VOUCHER_CONFIRMED] },
+      OR: query.keyword
+        ? [{ reportNo: { contains: query.keyword, mode: 'insensitive' } }, { title: { contains: query.keyword, mode: 'insensitive' } }]
+        : undefined,
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.expenseReport.findMany({
+        where,
+        orderBy: [{ status: 'asc' }, { submittedAt: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: this.voucherReportSelect(),
+      }),
+      this.prisma.expenseReport.count({ where }),
+    ]);
+
+    return { items, page, pageSize, total };
+  }
+
+  async getReport(user: AuthenticatedUser, reportId: string) {
+    this.ensurePermission(user, 'gl:voucher:read');
+    const report = await this.prisma.expenseReport.findFirst({
+      where: {
+        id: reportId,
+        deletedAt: null,
+        status: { in: [ExpenseReportStatus.PAID, ExpenseReportStatus.VOUCHER_DRAFTED, ExpenseReportStatus.VOUCHER_CONFIRMED] },
+      },
+      select: this.voucherReportSelect(),
+    });
+    if (!report) {
+      throw new NotFoundException('Voucher report does not exist.');
+    }
+    return report;
+  }
+
   generateReportVouchers(user: AuthenticatedUser, reportId: string, comment?: string) {
     this.ensurePermission(user, 'gl:voucher:generate');
     return this.prisma.$transaction(async (tx) => {
@@ -424,6 +467,54 @@ export class VouchersService {
       throw new NotFoundException('报销单不存在');
     }
     return report;
+  }
+
+  private voucherReportSelect() {
+    return {
+      id: true,
+      reportNo: true,
+      title: true,
+      status: true,
+      currency: true,
+      amountCents: true,
+      taxAmountCents: true,
+      deductibleTaxCents: true,
+      reimbursableCents: true,
+      paidAmountCents: true,
+      submittedAt: true,
+      createdAt: true,
+      applicant: { select: { id: true, name: true, employeeNo: true } },
+      department: { select: { id: true, name: true, code: true } },
+      costCenter: { select: { id: true, name: true, code: true } },
+      project: { select: { id: true, name: true, code: true } },
+      payments: {
+        where: { status: PaymentStatus.SUCCESS },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          status: true,
+          method: true,
+          amountCents: true,
+          currency: true,
+          paidAt: true,
+          paymentReference: true,
+          payerAccount: true,
+          payeeAccount: true,
+          failureReason: true,
+          comment: true,
+          fromStatus: true,
+          toStatus: true,
+          createdAt: true,
+          batch: { select: { id: true, batchNo: true, status: true } },
+          operator: { select: { id: true, name: true } },
+        },
+      },
+      vouchers: {
+        where: { status: { not: GlVoucherStatus.VOIDED } },
+        orderBy: { generatedAt: 'asc' },
+        select: this.voucherSelect(),
+      },
+    } satisfies Prisma.ExpenseReportSelect;
   }
 
   private ensureVoucherEligible(report: NonNullable<VoucherReport>) {

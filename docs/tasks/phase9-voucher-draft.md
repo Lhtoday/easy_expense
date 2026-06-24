@@ -98,3 +98,12 @@ npm.cmd run build --workspace frontend
 - 前端已先补充新报销状态的类型、筛选项和状态标签，完整凭证工作台/详情入口可作为下一步 UI 增量。
 - 验证已通过：`npm.cmd run db:generate`、`npm.cmd run test --workspace backend`、`npm.cmd run lint`、`npm.cmd run build`、本地 `prisma migrate deploy`。
 - 本步骤已提交并推送：`434b0ca feat: start phase9 voucher drafts`，分支 `main`，远端 `origin/main`。
+
+## 2026-06-24 开发记录
+
+- 已补齐前端凭证工作台：新增左侧 `凭证草稿` 菜单，支持按 `PAID`、`VOUCHER_DRAFTED`、`VOUCHER_CONFIRMED` 筛选，支持凭证预览、生成草稿和确认草稿。
+- 已在报销单详情新增 `凭证草稿` 分区，展示凭证草稿、凭证明细、借贷方向、科目、金额和确认入口。
+- 已新增凭证视角报销单列表和详情接口：`GET /vouchers/reports`、`GET /vouchers/reports/:reportId`，使用 `gl:voucher:read` 权限，避免凭证角色依赖报销单或付款菜单权限。
+- 已新增前端 `会计设置` 菜单，支持维护 `gl_account_subjects` 会计科目和 `gl_account_mappings` 科目映射，覆盖费用类型、员工往来、进项税和银行付款映射用途。
+- 已修复已有本地数据库中默认权限不自动补齐的问题：认证启动时会 upsert `DEFAULT_PERMISSIONS`，并为 `ADMIN` 角色补上缺失权限，确保 `gl:voucher:*` 和 `gl:account:*` 能显示对应菜单。
+- 验证已通过：`npm.cmd run build --workspace frontend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace backend`、`npm.cmd run lint --workspace backend`、`npm.cmd run test --workspace backend`。

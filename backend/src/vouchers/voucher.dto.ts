@@ -1,4 +1,4 @@
-import { GlAccountCategory, GlAccountMappingPurpose, GlNormalBalance, GlStatus, PaymentMethod } from '@prisma/client';
+import { ExpenseReportStatus, GlAccountCategory, GlAccountMappingPurpose, GlNormalBalance, GlStatus, PaymentMethod } from '@prisma/client';
 import { IsEnum, IsInt, IsISO8601, IsOptional, IsString, Min } from 'class-validator';
 
 export class AccountSubjectListQueryDto {
@@ -191,4 +191,22 @@ export class ConfirmVoucherDto {
   @IsOptional()
   @IsString()
   comment?: string;
+}
+
+export class VoucherReportListQueryDto {
+  @IsOptional()
+  @IsInt()
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  pageSize?: number;
+
+  @IsOptional()
+  @IsString()
+  keyword?: string;
+
+  @IsOptional()
+  @IsEnum(ExpenseReportStatus)
+  status?: ExpenseReportStatus;
 }

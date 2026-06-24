@@ -9,6 +9,7 @@ import {
   GenerateVoucherDto,
   UpdateAccountMappingDto,
   UpdateAccountSubjectDto,
+  VoucherReportListQueryDto,
 } from './voucher.dto';
 import { VouchersService } from './vouchers.service';
 
@@ -40,6 +41,16 @@ export class VouchersController {
   @Get('account-mappings')
   listMappings(@Req() request: RequestWithUser, @Query() query: AccountMappingListQueryDto) {
     return this.service.listMappings(request.user, query);
+  }
+
+  @Get('vouchers/reports')
+  listReports(@Req() request: RequestWithUser, @Query() query: VoucherReportListQueryDto) {
+    return this.service.listReports(request.user, query);
+  }
+
+  @Get('vouchers/reports/:reportId')
+  getReport(@Req() request: RequestWithUser, @Param('reportId') reportId: string) {
+    return this.service.getReport(request.user, reportId);
   }
 
   @Post('account-mappings')

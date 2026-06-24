@@ -150,6 +150,37 @@ export class AuthService {
   }
 
   private async ensureBootstrapAdmin() {
+    await this.prisma.$transaction(async (tx) => {
+      await Promise.all(
+        DEFAULT_PERMISSIONS.map((permission) =>
+          tx.permission.upsert({
+            where: { code: permission.code },
+            update: permission,
+            create: permission,
+          }),
+        ),
+      );
+
+      const adminRole = await tx.role.findUnique({
+        where: { code: 'ADMIN' },
+        select: { id: true, permissions: { select: { permission: { select: { code: true } } } } },
+      });
+      if (adminRole) {
+        const existingCodes = new Set(adminRole.permissions.map(({ permission }) => permission.code));
+        const missingPermissions = DEFAULT_PERMISSIONS.filter((permission) => !existingCodes.has(permission.code));
+        if (missingPermissions.length) {
+          const permissionRows = await tx.permission.findMany({
+            where: { code: { in: missingPermissions.map((permission) => permission.code) } },
+            select: { id: true },
+          });
+          await tx.rolePermission.createMany({
+            data: permissionRows.map((permission) => ({ roleId: adminRole.id, permissionId: permission.id })),
+            skipDuplicates: true,
+          });
+        }
+      }
+    });
+
     const existingUsers = await this.prisma.user.count();
     if (existingUsers > 0) {
       return;

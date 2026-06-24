@@ -6,6 +6,7 @@
   DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
+  FileDoneOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   KeyOutlined,
@@ -67,14 +68,24 @@ type ExpenseStatus =
   | 'VOIDED';
 type PaymentStatus = 'SUCCESS' | 'FAILED';
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CORPORATE_CARD' | 'OTHER';
+type VoucherType = 'EXPENSE_ACCRUAL' | 'PAYMENT';
+type VoucherStatus = 'DRAFT' | 'CONFIRMED' | 'VOIDED';
+type VoucherLineDirection = 'DEBIT' | 'CREDIT';
+type VoucherAction = 'GENERATE' | 'CONFIRM' | 'VOID';
+type GlStatus = 'ACTIVE' | 'DISABLED';
+type GlAccountCategory = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'COST' | 'EXPENSE' | 'REVENUE' | 'TAX';
+type GlNormalBalance = 'DEBIT' | 'CREDIT';
+type GlAccountMappingPurpose = 'EXPENSE_TYPE' | 'EMPLOYEE_PAYABLE' | 'INPUT_TAX' | 'BANK_PAYMENT';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
-type DetailSectionKey = 'summary' | 'invoice' | 'policy' | 'budget';
+type DetailSectionKey = 'summary' | 'invoice' | 'policy' | 'budget' | 'voucher';
 type DetailSectionStatus = 'PASS' | 'WARNING' | 'BLOCK' | 'PENDING' | 'INFO';
 type ResourceKey =
   | 'expense-reports'
   | 'approvals'
   | 'finance-reviews'
   | 'payments'
+  | 'vouchers'
+  | 'account-settings'
   | 'expense-policies'
   | 'budgets'
   | 'users'
@@ -145,6 +156,7 @@ interface ExpenseReportRecord {
   financeReviews?: FinanceReviewRecord[];
   financeReviewChecks?: FinanceReviewCheckRecord[];
   payments?: PaymentRecord[];
+  vouchers?: VoucherRecord[];
 }
 
 interface ExpenseReportItemRecord {
@@ -177,6 +189,8 @@ interface ExpenseReportLogRecord {
     | 'FINANCE_ADJUST'
     | 'PAYMENT_REGISTER'
     | 'PAYMENT_FAIL'
+    | 'VOUCHER_DRAFT'
+    | 'VOUCHER_CONFIRM'
     | 'VOID';
   fromStatus?: ExpenseStatus | null;
   toStatus: ExpenseStatus;
@@ -253,6 +267,116 @@ interface PaymentRecord {
   createdAt: string;
   batch?: { id: string; batchNo: string; status: 'COMPLETED' | 'PARTIAL_FAILED' } | null;
   operator: { id: string; name: string };
+}
+
+interface VoucherRecord {
+  id?: string;
+  voucherNo?: string;
+  voucherType: VoucherType;
+  status?: VoucherStatus;
+  reportId?: string;
+  paymentId?: string | null;
+  currency: string;
+  totalDebitCents: number;
+  totalCreditCents: number;
+  summary: string;
+  generatedAt?: string;
+  confirmedAt?: string | null;
+  comment?: string | null;
+  generatedBy?: { id: string; name: string };
+  confirmedBy?: { id: string; name: string } | null;
+  lines: VoucherLineRecord[];
+  logs?: VoucherLogRecord[];
+}
+
+interface VoucherLineRecord {
+  id?: string;
+  lineNo?: number;
+  direction: VoucherLineDirection;
+  accountSubjectCode: string;
+  amountCents: number;
+  currency: string;
+  summary: string;
+  itemId?: string | null;
+  paymentId?: string | null;
+  accountSubject?: { code: string; name: string; category: string } | null;
+}
+
+interface VoucherLogRecord {
+  id: string;
+  action: VoucherAction;
+  fromStatus?: VoucherStatus | null;
+  toStatus?: VoucherStatus | null;
+  comment?: string | null;
+  createdAt: string;
+  operator: { id: string; name: string };
+}
+
+interface VoucherPreviewResult {
+  reportId: string;
+  reportNo: string;
+  vouchers: VoucherRecord[];
+}
+
+interface AccountSubjectRecord {
+  id: string;
+  code: string;
+  name: string;
+  category: GlAccountCategory;
+  normalBalance: GlNormalBalance;
+  description?: string | null;
+  status: GlStatus;
+  createdAt: string;
+  createdBy?: { id: string; name: string };
+  updatedBy?: { id: string; name: string } | null;
+}
+
+interface AccountMappingRecord {
+  id: string;
+  purpose: GlAccountMappingPurpose;
+  expenseTypeCode?: string | null;
+  applicantId?: string | null;
+  paymentMethod?: PaymentMethod | null;
+  payerAccount?: string | null;
+  departmentId?: string | null;
+  costCenterId?: string | null;
+  projectId?: string | null;
+  accountSubjectCode: string;
+  priority: number;
+  status: GlStatus;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  createdAt: string;
+  accountSubject?: { code: string; name: string; category: GlAccountCategory } | null;
+  applicant?: { id: string; name: string; employeeNo: string } | null;
+  department?: { id: string; code: string; name: string } | null;
+  costCenter?: { id: string; code: string; name: string } | null;
+  project?: { id: string; code: string; name: string } | null;
+}
+
+interface AccountSubjectFormValues {
+  code?: string;
+  name: string;
+  category: GlAccountCategory;
+  normalBalance: GlNormalBalance;
+  description?: string;
+  status?: GlStatus;
+}
+
+interface AccountMappingFormValues {
+  purpose: GlAccountMappingPurpose;
+  expenseTypeCode?: string;
+  applicantId?: string;
+  paymentMethod?: PaymentMethod;
+  payerAccount?: string;
+  departmentId?: string;
+  costCenterId?: string;
+  projectId?: string;
+  accountSubjectCode: string;
+  priority?: number;
+  effectiveFrom?: Dayjs;
+  effectiveTo?: Dayjs;
+  status?: GlStatus;
 }
 
 interface ExpenseAttachmentRecord {
@@ -473,6 +597,8 @@ const resources: Array<{
   { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
   { key: 'finance-reviews', label: '财务审核', icon: <SafetyOutlined />, readPermission: 'exp:finance-review:read', writePermission: 'exp:finance-review:review' },
   { key: 'payments', label: '出纳付款', icon: <BankOutlined />, readPermission: 'exp:payment:read', writePermission: 'exp:payment:pay' },
+  { key: 'vouchers', label: '凭证草稿', icon: <FileDoneOutlined />, readPermission: 'gl:voucher:read', writePermission: 'gl:voucher:generate' },
+  { key: 'account-settings', label: '会计设置', icon: <ControlOutlined />, readPermission: 'gl:account:read', writePermission: 'gl:account:write' },
   { key: 'expense-policies', label: '费用政策', icon: <ControlOutlined />, readPermission: 'exp:policy:read', writePermission: 'exp:policy:write' },
   { key: 'budgets', label: '预算控制', icon: <BankOutlined />, readPermission: 'exp:budget:read', writePermission: 'exp:budget:write' },
   { key: 'users', label: '用户', icon: <TeamOutlined />, readPermission: 'iam:user:read', writePermission: 'iam:user:write' },
@@ -541,6 +667,28 @@ const paymentMethodOptions: Array<{ label: string; value: PaymentMethod }> = [
   { label: '其他', value: 'OTHER' },
 ];
 
+const accountCategoryOptions: Array<{ label: string; value: GlAccountCategory }> = [
+  { label: '资产', value: 'ASSET' },
+  { label: '负债', value: 'LIABILITY' },
+  { label: '权益', value: 'EQUITY' },
+  { label: '成本', value: 'COST' },
+  { label: '费用', value: 'EXPENSE' },
+  { label: '收入', value: 'REVENUE' },
+  { label: '税金', value: 'TAX' },
+];
+
+const normalBalanceOptions: Array<{ label: string; value: GlNormalBalance }> = [
+  { label: '借方', value: 'DEBIT' },
+  { label: '贷方', value: 'CREDIT' },
+];
+
+const accountMappingPurposeOptions: Array<{ label: string; value: GlAccountMappingPurpose }> = [
+  { label: '费用类型', value: 'EXPENSE_TYPE' },
+  { label: '员工往来', value: 'EMPLOYEE_PAYABLE' },
+  { label: '进项税', value: 'INPUT_TAX' },
+  { label: '银行付款', value: 'BANK_PAYMENT' },
+];
+
 function getToken() {
   return localStorage.getItem('expenseflow_token');
 }
@@ -591,6 +739,10 @@ export function App() {
   const [paymentStatus, setPaymentStatus] = useState<ExpenseStatus | undefined>('FINANCE_APPROVED');
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentPageSize, setPaymentPageSize] = useState(10);
+  const [voucherKeyword, setVoucherKeyword] = useState('');
+  const [voucherStatus, setVoucherStatus] = useState<ExpenseStatus | undefined>('PAID');
+  const [voucherPage, setVoucherPage] = useState(1);
+  const [voucherPageSize, setVoucherPageSize] = useState(10);
   const [form] = Form.useForm();
   const [expenseForm] = Form.useForm<ExpenseFormValues>();
   const queryClient = useQueryClient();
@@ -638,6 +790,8 @@ export function App() {
   const canApprove = me?.permissions.includes('exp:approval:approve') ?? false;
   const canFinanceReview = me?.permissions.includes('exp:finance-review:review') ?? false;
   const canPay = me?.permissions.includes('exp:payment:pay') ?? false;
+  const canGenerateVoucher = me?.permissions.includes('gl:voucher:generate') ?? false;
+  const canConfirmVoucher = me?.permissions.includes('gl:voucher:confirm') ?? false;
   const canBudgetWrite = me?.permissions.includes('exp:budget:write') ?? false;
 
   const listQuery = useQuery<PageResult<BaseRecord>>({
@@ -665,6 +819,7 @@ export function App() {
       activeResource !== 'approvals' &&
       activeResource !== 'finance-reviews' &&
       activeResource !== 'payments' &&
+      activeResource !== 'vouchers' &&
       activeResource !== 'expense-policies' &&
       activeResource !== 'budgets',
   });
@@ -770,6 +925,18 @@ export function App() {
     enabled: Boolean(me) && activeResource === 'payments',
   });
 
+  const vouchersQuery = useQuery<PageResult<ExpenseReportRecord>>({
+    queryKey: ['vouchers', voucherPage, voucherPageSize, voucherKeyword, voucherStatus],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ExpenseReportRecord>>>('/vouchers/reports', {
+        headers: authHeaders(),
+        params: { page: voucherPage, pageSize: voucherPageSize, keyword: voucherKeyword || undefined, status: voucherStatus },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'vouchers',
+  });
+
   const expenseTypesQuery = useQuery<PageResult<ExpenseTypeRecord>>({
     queryKey: ['expense-types'],
     queryFn: async () => {
@@ -779,7 +946,12 @@ export function App() {
       });
       return response.data.data;
     },
-    enabled: Boolean(me?.permissions.includes('exp:policy:read') || me?.permissions.includes('exp:report:read') || me?.permissions.includes('exp:budget:read')),
+    enabled: Boolean(
+      me?.permissions.includes('exp:policy:read') ||
+        me?.permissions.includes('exp:report:read') ||
+        me?.permissions.includes('exp:budget:read') ||
+        me?.permissions.includes('gl:account:read'),
+    ),
   });
 
   const expensePoliciesQuery = useQuery<PageResult<ExpensePolicyRecord>>({
@@ -804,6 +976,30 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'budgets',
+  });
+
+  const accountSubjectsQuery = useQuery<PageResult<AccountSubjectRecord>>({
+    queryKey: ['account-subjects'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<AccountSubjectRecord>>>('/account-subjects', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'account-settings',
+  });
+
+  const accountMappingsQuery = useQuery<PageResult<AccountMappingRecord>>({
+    queryKey: ['account-mappings'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<AccountMappingRecord>>>('/account-mappings', {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'account-settings',
   });
 
   const expenseTypeOptionsForForm = useMemo(() => {
@@ -955,6 +1151,34 @@ export function App() {
     onError: (error) => messageApi.error(apiErrorMessage(error, '付款处理失败，请检查单据状态、金额或权限')),
   });
 
+  const generateVoucherMutation = useMutation({
+    mutationFn: async ({ reportId, comment }: { reportId: string; comment?: string }) =>
+      api.post(`/vouchers/reports/${reportId}/generate`, { comment }, { headers: authHeaders() }),
+    onSuccess: async (_response, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      if (expenseViewing?.id === variables.reportId) {
+        await refreshExpenseDetail(variables.reportId);
+      }
+      messageApi.success('凭证草稿已生成');
+    },
+    onError: (error) => messageApi.error(apiErrorMessage(error, '凭证生成失败，请确认单据已付款且科目映射完整')),
+  });
+
+  const confirmVoucherMutation = useMutation({
+    mutationFn: async ({ voucherId, comment }: { voucherId: string; comment?: string }) =>
+      api.post(`/vouchers/${voucherId}/confirm`, { comment }, { headers: authHeaders() }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      if (expenseViewing) {
+        await refreshExpenseDetail(expenseViewing.id);
+      }
+      messageApi.success('凭证草稿已确认');
+    },
+    onError: (error) => messageApi.error(apiErrorMessage(error, '凭证确认失败，请检查草稿状态、借贷平衡或权限')),
+  });
+
   const loginMutation = useMutation({
     mutationFn: async (values: { email: string; password: string }) => {
       const response = await api.post<ApiResponse<{ accessToken: string; user: SessionUser }>>('/auth/login', values);
@@ -997,6 +1221,8 @@ export function App() {
         ? `/finance-reviews/reports/${record.id}`
         : activeResource === 'payments'
           ? `/payments/reports/${record.id}`
+          : activeResource === 'vouchers'
+            ? `/vouchers/reports/${record.id}`
           : `/expense-reports/${record.id}`;
     const response = await api.get<ApiResponse<ExpenseReportRecord>>(detailUrl, { headers: authHeaders() });
     setExpenseViewing(response.data.data);
@@ -1115,6 +1341,10 @@ export function App() {
                     ? '会计维度、税额和发票复核'
                     : activeResource === 'payments'
                       ? '待付款、付款登记和付款审计'
+                      : activeResource === 'vouchers'
+                        ? '凭证预览、草稿生成和财务确认'
+                      : activeResource === 'account-settings'
+                        ? '会计科目、映射规则和凭证生成依据'
                       : activeResource === 'expense-policies'
                         ? '费用类型、政策规则和超标控制'
                         : activeResource === 'budgets'
@@ -1248,6 +1478,46 @@ export function App() {
               }}
               onView={(record) => void openExpenseDetail(record)}
             />
+          ) : activeResource === 'vouchers' ? (
+            <VouchersView
+              canConfirm={canConfirmVoucher}
+              canGenerate={canGenerateVoucher}
+              data={vouchersQuery.data}
+              keyword={voucherKeyword}
+              loading={vouchersQuery.isLoading || generateVoucherMutation.isPending || confirmVoucherMutation.isPending}
+              page={voucherPage}
+              pageSize={voucherPageSize}
+              status={voucherStatus}
+              onConfirm={(voucher, comment) => voucher.id && confirmVoucherMutation.mutate({ voucherId: voucher.id, comment })}
+              onGenerate={(record, comment) => generateVoucherMutation.mutate({ reportId: record.id, comment })}
+              onPageChange={(page, pageSize) => {
+                setVoucherPage(page);
+                setVoucherPageSize(pageSize);
+              }}
+              onSearch={(keyword) => {
+                setVoucherKeyword(keyword.trim());
+                setVoucherPage(1);
+              }}
+              onStatusChange={(status) => {
+                setVoucherStatus(status);
+                setVoucherPage(1);
+              }}
+              onView={(record) => void openExpenseDetail(record)}
+            />
+          ) : activeResource === 'account-settings' ? (
+            <AccountSettingsView
+              canWrite={canWrite}
+              expenseTypes={expenseTypesQuery.data?.items ?? []}
+              loading={accountSubjectsQuery.isLoading || accountMappingsQuery.isLoading || expenseTypesQuery.isLoading}
+              mappings={accountMappingsQuery.data?.items ?? []}
+              referenceData={referenceData}
+              subjects={accountSubjectsQuery.data?.items ?? []}
+              onChanged={() => {
+                void queryClient.invalidateQueries({ queryKey: ['account-subjects'] });
+                void queryClient.invalidateQueries({ queryKey: ['account-mappings'] });
+                void queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+              }}
+            />
           ) : activeResource === 'expense-policies' ? (
             <ExpensePoliciesView
               canWrite={canWrite}
@@ -1318,9 +1588,13 @@ export function App() {
           <ExpenseReportDetail
             canBudgetWrite={canBudgetWrite}
             canFinanceReview={canFinanceReview}
+            canConfirmVoucher={canConfirmVoucher}
+            canGenerateVoucher={canGenerateVoucher}
             canWrite={canWrite}
             record={expenseViewing}
             referenceData={referenceData}
+            onConfirmVoucher={(voucher, comment) => voucher.id && confirmVoucherMutation.mutate({ voucherId: voucher.id, comment })}
+            onGenerateVoucher={(comment) => generateVoucherMutation.mutate({ reportId: expenseViewing.id, comment })}
             onChanged={() => refreshExpenseDetail(expenseViewing.id)}
           />
         ) : null}
@@ -1366,6 +1640,242 @@ function MasterDataView({
         scroll={{ x: activeResource === 'roles' ? 1180 : activeResource === 'permissions' ? 760 : 920 }}
         pagination={{ pageSize: 10, total: data?.total }}
       />
+    </>
+  );
+}
+
+function AccountSettingsView({
+  canWrite,
+  expenseTypes,
+  loading,
+  mappings,
+  referenceData,
+  subjects,
+  onChanged,
+}: {
+  canWrite: boolean;
+  expenseTypes: ExpenseTypeRecord[];
+  loading: boolean;
+  mappings: AccountMappingRecord[];
+  referenceData: ReferenceData;
+  subjects: AccountSubjectRecord[];
+  onChanged: () => void;
+}) {
+  const [subjectOpen, setSubjectOpen] = useState(false);
+  const [mappingOpen, setMappingOpen] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<AccountSubjectRecord | null>(null);
+  const [editingMapping, setEditingMapping] = useState<AccountMappingRecord | null>(null);
+  const [subjectForm] = Form.useForm<AccountSubjectFormValues>();
+  const [mappingForm] = Form.useForm<AccountMappingFormValues>();
+  const activeSubjects = subjects.filter((subject) => subject.status === 'ACTIVE');
+  const subjectOptions = activeSubjects.map((subject) => ({ label: `${subject.code} ${subject.name}`, value: subject.code }));
+  const expenseTypeOptionsForMapping = expenseTypes
+    .filter((item): item is ExpenseTypeRecord & { code: string } => item.status === 'ACTIVE' && Boolean(item.code))
+    .map((item) => ({ label: `${item.name} (${item.code})`, value: item.code }));
+
+  const saveSubjectMutation = useMutation({
+    mutationFn: async (values: AccountSubjectFormValues) => {
+      const payload = accountSubjectPayload(values, Boolean(editingSubject));
+      if (editingSubject) {
+        return api.patch(`/account-subjects/${editingSubject.id}`, payload, { headers: authHeaders() });
+      }
+      return api.post('/account-subjects', payload, { headers: authHeaders() });
+    },
+    onSuccess: () => {
+      setSubjectOpen(false);
+      setEditingSubject(null);
+      subjectForm.resetFields();
+      onChanged();
+      message.success('会计科目已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '会计科目保存失败，请检查编码、分类或权限')),
+  });
+
+  const disableSubjectMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/account-subjects/${id}`, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('会计科目已停用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '会计科目停用失败')),
+  });
+
+  const saveMappingMutation = useMutation({
+    mutationFn: async (values: AccountMappingFormValues) => {
+      const payload = accountMappingPayload(values, Boolean(editingMapping));
+      if (editingMapping) {
+        return api.patch(`/account-mappings/${editingMapping.id}`, payload, { headers: authHeaders() });
+      }
+      return api.post('/account-mappings', payload, { headers: authHeaders() });
+    },
+    onSuccess: () => {
+      setMappingOpen(false);
+      setEditingMapping(null);
+      mappingForm.resetFields();
+      onChanged();
+      message.success('科目映射已保存');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '科目映射保存失败，请检查科目、用途或匹配维度')),
+  });
+
+  const disableMappingMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/account-mappings/${id}`, { headers: authHeaders() }),
+    onSuccess: () => {
+      onChanged();
+      message.success('科目映射已停用');
+    },
+    onError: (error) => message.error(apiErrorMessage(error, '科目映射停用失败')),
+  });
+
+  function openSubjectModal(subject?: AccountSubjectRecord) {
+    setEditingSubject(subject ?? null);
+    subjectForm.setFieldsValue(subject ? accountSubjectToForm(subject) : { category: 'EXPENSE', normalBalance: 'DEBIT' });
+    setSubjectOpen(true);
+  }
+
+  function openMappingModal(mapping?: AccountMappingRecord) {
+    setEditingMapping(mapping ?? null);
+    mappingForm.setFieldsValue(
+      mapping
+        ? accountMappingToForm(mapping)
+        : {
+            purpose: 'EXPENSE_TYPE',
+            priority: 100,
+          },
+    );
+    setMappingOpen(true);
+  }
+
+  return (
+    <>
+      <div className="account-settings-grid">
+        <section>
+          <div className="table-toolbar">
+            <Text strong>会计科目</Text>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={() => openSubjectModal()}>
+              新增科目
+            </Button>
+          </div>
+          <Table
+            rowKey="id"
+            loading={loading || disableSubjectMutation.isPending}
+            dataSource={subjects}
+            columns={accountSubjectColumns(canWrite, openSubjectModal, disableSubjectMutation.mutate)}
+            pagination={{ pageSize: 8, total: subjects.length }}
+            scroll={{ x: 860 }}
+          />
+        </section>
+        <section>
+          <div className="table-toolbar">
+            <Text strong>科目映射</Text>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite || !activeSubjects.length} onClick={() => openMappingModal()}>
+              新增映射
+            </Button>
+          </div>
+          <Table
+            rowKey="id"
+            loading={loading || disableMappingMutation.isPending}
+            dataSource={mappings}
+            columns={accountMappingColumns(canWrite, openMappingModal, disableMappingMutation.mutate)}
+            pagination={{ pageSize: 8, total: mappings.length }}
+            scroll={{ x: 1280 }}
+          />
+        </section>
+      </div>
+
+      <Modal
+        title={editingSubject ? '编辑会计科目' : '新增会计科目'}
+        open={subjectOpen}
+        onCancel={() => {
+          setSubjectOpen(false);
+          setEditingSubject(null);
+          subjectForm.resetFields();
+        }}
+        onOk={() => subjectForm.submit()}
+        okButtonProps={{ loading: saveSubjectMutation.isPending }}
+      >
+        <Form form={subjectForm} layout="vertical" onFinish={(values) => saveSubjectMutation.mutate(values)}>
+          <Form.Item name="code" label="科目编码" rules={[{ required: !editingSubject }]} hidden={Boolean(editingSubject)}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="name" label="科目名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="category" label="科目类别" rules={[{ required: true }]}>
+            <Select options={accountCategoryOptions} />
+          </Form.Item>
+          <Form.Item name="normalBalance" label="余额方向" rules={[{ required: true }]}>
+            <Select options={normalBalanceOptions} />
+          </Form.Item>
+          {editingSubject ? (
+            <Form.Item name="status" label="状态">
+              <Select options={statusOptions} />
+            </Form.Item>
+          ) : null}
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={editingMapping ? '编辑科目映射' : '新增科目映射'}
+        open={mappingOpen}
+        onCancel={() => {
+          setMappingOpen(false);
+          setEditingMapping(null);
+          mappingForm.resetFields();
+        }}
+        onOk={() => mappingForm.submit()}
+        okButtonProps={{ loading: saveMappingMutation.isPending }}
+        width={760}
+      >
+        <Form form={mappingForm} layout="vertical" onFinish={(values) => saveMappingMutation.mutate(values)}>
+          <div className="account-mapping-form-grid">
+            <Form.Item name="purpose" label="映射用途" rules={[{ required: true }]}>
+              <Select options={accountMappingPurposeOptions} />
+            </Form.Item>
+            <Form.Item name="accountSubjectCode" label="会计科目" rules={[{ required: true }]}>
+              <Select showSearch optionFilterProp="label" options={subjectOptions} />
+            </Form.Item>
+            <Form.Item name="priority" label="优先级">
+              <Input type="number" min={0} />
+            </Form.Item>
+            {editingMapping ? (
+              <Form.Item name="status" label="状态">
+                <Select options={statusOptions} />
+              </Form.Item>
+            ) : null}
+            <Form.Item name="expenseTypeCode" label="费用类型">
+              <Select allowClear showSearch optionFilterProp="label" options={expenseTypeOptionsForMapping.length ? expenseTypeOptionsForMapping : expenseTypeOptions} />
+            </Form.Item>
+            <Form.Item name="paymentMethod" label="付款方式">
+              <Select allowClear options={paymentMethodOptions} />
+            </Form.Item>
+            <Form.Item name="payerAccount" label="付款账户">
+              <Input />
+            </Form.Item>
+            <Form.Item name="applicantId" label="申请人 ID">
+              <Input />
+            </Form.Item>
+            <Form.Item name="departmentId" label="部门">
+              <ReferenceSelect records={referenceData.departments} placeholder="选择部门" />
+            </Form.Item>
+            <Form.Item name="costCenterId" label="成本中心">
+              <ReferenceSelect records={referenceData.costCenters} placeholder="选择成本中心" />
+            </Form.Item>
+            <Form.Item name="projectId" label="项目">
+              <ReferenceSelect records={referenceData.projects} placeholder="选择项目" />
+            </Form.Item>
+            <Form.Item name="effectiveFrom" label="生效开始">
+              <DatePicker className="full-width-control" />
+            </Form.Item>
+            <Form.Item name="effectiveTo" label="生效结束">
+              <DatePicker className="full-width-control" />
+            </Form.Item>
+          </div>
+        </Form>
+      </Modal>
     </>
   );
 }
@@ -2025,6 +2535,172 @@ function PaymentsView({
   );
 }
 
+function VouchersView({
+  canConfirm,
+  canGenerate,
+  data,
+  keyword,
+  loading,
+  page,
+  pageSize,
+  status,
+  onConfirm,
+  onGenerate,
+  onPageChange,
+  onSearch,
+  onStatusChange,
+  onView,
+}: {
+  canConfirm: boolean;
+  canGenerate: boolean;
+  data?: PageResult<ExpenseReportRecord>;
+  keyword: string;
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  status?: ExpenseStatus;
+  onConfirm: (voucher: VoucherRecord, comment?: string) => void;
+  onGenerate: (record: ExpenseReportRecord, comment?: string) => void;
+  onPageChange: (page: number, pageSize: number) => void;
+  onSearch: (keyword: string) => void;
+  onStatusChange: (status?: ExpenseStatus) => void;
+  onView: (record: ExpenseReportRecord) => void;
+}) {
+  const [preview, setPreview] = useState<VoucherPreviewResult | null>(null);
+  const previewMutation = useMutation({
+    mutationFn: async (reportId: string) => {
+      const response = await api.get<ApiResponse<VoucherPreviewResult>>(`/vouchers/reports/${reportId}/preview`, { headers: authHeaders() });
+      return response.data.data;
+    },
+    onSuccess: setPreview,
+    onError: (error) => message.error(apiErrorMessage(error, '凭证预览失败，请确认单据已付款且科目映射完整')),
+  });
+
+  return (
+    <>
+      <div className="table-toolbar">
+        <Space className="expense-filters">
+          <Input.Search defaultValue={keyword} placeholder="搜索单号或标题" allowClear onSearch={onSearch} />
+          <Select
+            allowClear
+            placeholder="凭证状态"
+            value={status}
+            options={expenseStatusOptions.filter((option) => ['PAID', 'VOUCHER_DRAFTED', 'VOUCHER_CONFIRMED'].includes(option.value))}
+            onChange={(value) => onStatusChange(value)}
+            className="expense-status-filter"
+          />
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        loading={loading || previewMutation.isPending}
+        dataSource={data?.items ?? []}
+        columns={voucherReportColumns(canGenerate, canConfirm, (record) => previewMutation.mutate(record.id), onGenerate, onConfirm, onView)}
+        scroll={{ x: 1420 }}
+        pagination={{ current: page, pageSize, total: data?.total, showSizeChanger: true }}
+        onChange={(pagination) => onPageChange(pagination.current ?? 1, pagination.pageSize ?? pageSize)}
+      />
+      <Modal title={preview ? `${preview.reportNo} 凭证预览` : '凭证预览'} open={Boolean(preview)} footer={null} onCancel={() => setPreview(null)} width={980}>
+        {preview ? <VoucherList vouchers={preview.vouchers} canConfirm={false} onConfirm={onConfirm} /> : null}
+      </Modal>
+    </>
+  );
+}
+
+function voucherReportColumns(
+  canGenerate: boolean,
+  canConfirm: boolean,
+  onPreview: (record: ExpenseReportRecord) => void,
+  onGenerate: (record: ExpenseReportRecord, comment?: string) => void,
+  onConfirm: (voucher: VoucherRecord, comment?: string) => void,
+  onView: (record: ExpenseReportRecord) => void,
+): ColumnsType<ExpenseReportRecord> {
+  return [
+    { title: '单号', dataIndex: 'reportNo', width: 170 },
+    { title: '标题', dataIndex: 'title', width: 180 },
+    { title: '状态', dataIndex: 'status', width: 130, render: (value: ExpenseStatus) => <ExpenseStatusTag status={value} /> },
+    { title: '申请人', dataIndex: 'applicant', width: 120, render: (applicant?: ExpenseReportRecord['applicant']) => applicant?.name ?? '-' },
+    { title: '可报销金额', dataIndex: 'reimbursableCents', width: 130, align: 'right', render: formatMoney },
+    { title: '实付金额', dataIndex: 'paidAmountCents', width: 120, align: 'right', render: formatMoney },
+    {
+      title: '凭证',
+      dataIndex: 'vouchers',
+      width: 210,
+      render: (vouchers?: VoucherRecord[]) => <VoucherSummaryTags vouchers={vouchers ?? []} />,
+    },
+    { title: '成本中心', dataIndex: 'costCenter', width: 150, render: (costCenter?: ExpenseReportRecord['costCenter']) => costCenter?.name ?? '-' },
+    { title: '提交时间', dataIndex: 'submittedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    {
+      title: '操作',
+      width: 360,
+      fixed: 'right',
+      render: (_: unknown, record) => {
+        const draftVouchers = (record.vouchers ?? []).filter((voucher) => voucher.status === 'DRAFT');
+        return (
+          <Space>
+            <Button size="small" icon={<EyeOutlined />} onClick={() => onView(record)}>
+              查看
+            </Button>
+            <Button size="small" onClick={() => onPreview(record)} disabled={record.status !== 'PAID'}>
+              预览
+            </Button>
+            <Button size="small" type="primary" disabled={!canGenerate || record.status !== 'PAID'} onClick={() => openVoucherGenerateConfirm(record, onGenerate)}>
+              生成
+            </Button>
+            <Button size="small" disabled={!canConfirm || draftVouchers.length !== 1} onClick={() => draftVouchers[0] && openVoucherConfirm(draftVouchers[0], onConfirm)}>
+              确认
+            </Button>
+          </Space>
+        );
+      },
+    },
+  ];
+}
+
+function VoucherSummaryTags({ vouchers }: { vouchers: VoucherRecord[] }) {
+  if (!vouchers.length) {
+    return <Tag color="default">未生成</Tag>;
+  }
+  const draftCount = vouchers.filter((voucher) => voucher.status === 'DRAFT').length;
+  const confirmedCount = vouchers.filter((voucher) => voucher.status === 'CONFIRMED').length;
+  return (
+    <Space>
+      <Tag color={draftCount ? 'purple' : 'default'}>草稿 {draftCount}</Tag>
+      <Tag color={confirmedCount ? 'green' : 'default'}>确认 {confirmedCount}</Tag>
+    </Space>
+  );
+}
+
+function openVoucherGenerateConfirm(record: ExpenseReportRecord, onGenerate: (record: ExpenseReportRecord, comment?: string) => void) {
+  let comment = '';
+  Modal.confirm({
+    title: '生成凭证草稿',
+    content: (
+      <Space direction="vertical" className="detail-check-panel-body">
+        <Text>{record.reportNo} · {formatMoney(record.paidAmountCents)}</Text>
+        <Input.TextArea rows={3} placeholder="生成说明" onChange={(event) => { comment = event.target.value; }} />
+      </Space>
+    ),
+    okText: '生成',
+    onOk: () => onGenerate(record, comment.trim() || undefined),
+  });
+}
+
+function openVoucherConfirm(voucher: VoucherRecord, onConfirm: (voucher: VoucherRecord, comment?: string) => void) {
+  let comment = '';
+  Modal.confirm({
+    title: '确认凭证草稿',
+    content: (
+      <Space direction="vertical" className="detail-check-panel-body">
+        <Text>{voucher.voucherNo ?? voucherTypeName(voucher.voucherType)} · 借贷合计 {formatMoney(voucher.totalDebitCents)}</Text>
+        <Input.TextArea rows={3} placeholder="确认意见" onChange={(event) => { comment = event.target.value; }} />
+      </Space>
+    ),
+    okText: '确认',
+    onOk: () => onConfirm(voucher, comment.trim() || undefined),
+  });
+}
+
 function paymentColumns(
   canPay: boolean,
   onRegister: (record: ExpenseReportRecord) => void,
@@ -2075,6 +2751,75 @@ function paymentColumns(
           </Button>
           <Button size="small" danger disabled={!canPay || record.status !== 'FINANCE_APPROVED'} onClick={() => onFail(record)}>
             失败
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+}
+
+function accountSubjectColumns(
+  canWrite: boolean,
+  onEdit: (record: AccountSubjectRecord) => void,
+  onDisable: (id: string) => void,
+): ColumnsType<AccountSubjectRecord> {
+  return [
+    { title: '编码', dataIndex: 'code', width: 120 },
+    { title: '名称', dataIndex: 'name', width: 160 },
+    { title: '类别', dataIndex: 'category', width: 100, render: accountCategoryName },
+    { title: '余额方向', dataIndex: 'normalBalance', width: 100, render: voucherLineDirectionName },
+    { title: '说明', dataIndex: 'description', width: 220, render: (value?: string | null) => value ?? '-' },
+    { title: '状态', dataIndex: 'status', width: 90, render: (status: GlStatus) => <Tag color={status === 'ACTIVE' ? 'green' : 'default'}>{status === 'ACTIVE' ? '启用' : '停用'}</Tag> },
+    {
+      title: '操作',
+      width: 150,
+      fixed: 'right',
+      render: (_: unknown, record) => (
+        <Space>
+          <Button size="small" disabled={!canWrite} onClick={() => onEdit(record)}>
+            编辑
+          </Button>
+          <Button size="small" danger disabled={!canWrite || record.status === 'DISABLED'} onClick={() => onDisable(record.id)}>
+            停用
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+}
+
+function accountMappingColumns(
+  canWrite: boolean,
+  onEdit: (record: AccountMappingRecord) => void,
+  onDisable: (id: string) => void,
+): ColumnsType<AccountMappingRecord> {
+  return [
+    { title: '用途', dataIndex: 'purpose', width: 120, render: accountMappingPurposeName },
+    {
+      title: '会计科目',
+      dataIndex: 'accountSubjectCode',
+      width: 220,
+      render: (_: string, record) => `${record.accountSubjectCode} ${record.accountSubject?.name ?? ''}`.trim(),
+    },
+    { title: '优先级', dataIndex: 'priority', width: 90 },
+    { title: '费用类型', dataIndex: 'expenseTypeCode', width: 120, render: (value?: string | null) => expenseTypeName(value ?? undefined) },
+    { title: '付款方式', dataIndex: 'paymentMethod', width: 120, render: (value?: PaymentMethod | null) => (value ? paymentMethodName(value) : '-') },
+    { title: '付款账户', dataIndex: 'payerAccount', width: 140, render: (value?: string | null) => value ?? '-' },
+    { title: '部门', dataIndex: 'department', width: 150, render: (value?: AccountMappingRecord['department']) => value?.name ?? '-' },
+    { title: '成本中心', dataIndex: 'costCenter', width: 150, render: (value?: AccountMappingRecord['costCenter']) => value?.name ?? '-' },
+    { title: '项目', dataIndex: 'project', width: 150, render: (value?: AccountMappingRecord['project']) => value?.name ?? '-' },
+    { title: '状态', dataIndex: 'status', width: 90, render: (status: GlStatus) => <Tag color={status === 'ACTIVE' ? 'green' : 'default'}>{status === 'ACTIVE' ? '启用' : '停用'}</Tag> },
+    {
+      title: '操作',
+      width: 150,
+      fixed: 'right',
+      render: (_: unknown, record) => (
+        <Space>
+          <Button size="small" disabled={!canWrite} onClick={() => onEdit(record)}>
+            编辑
+          </Button>
+          <Button size="small" danger disabled={!canWrite || record.status === 'DISABLED'} onClick={() => onDisable(record.id)}>
+            停用
           </Button>
         </Space>
       ),
@@ -2433,18 +3178,26 @@ function ExpenseReportForm({
 
 function ExpenseReportDetail({
   canBudgetWrite,
+  canConfirmVoucher,
   canFinanceReview,
+  canGenerateVoucher,
   canWrite,
   record,
   referenceData,
   onChanged,
+  onConfirmVoucher,
+  onGenerateVoucher,
 }: {
   canBudgetWrite: boolean;
+  canConfirmVoucher: boolean;
   canFinanceReview: boolean;
+  canGenerateVoucher: boolean;
   canWrite: boolean;
   record: ExpenseReportRecord;
   referenceData: ReferenceData;
   onChanged: () => Promise<void>;
+  onConfirmVoucher: (voucher: VoucherRecord, comment?: string) => void;
+  onGenerateVoucher: (comment?: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [attachmentForm] = Form.useForm<AttachmentFormValues>();
@@ -2552,11 +3305,13 @@ function ExpenseReportDetail({
   const invoiceStatus = invoiceSectionStatus(invoiceSummary);
   const policyStatus = policySectionStatus(record.policyChecks ?? []);
   const budgetStatus = budgetSectionStatus(record.budgetChecks ?? [], record.budgetOccupations ?? []);
+  const voucherStatusSummary = voucherSectionStatus(record.status, record.vouchers ?? []);
   const detailSections: Array<{ key: DetailSectionKey; label: string; status: DetailSectionStatus; description: string }> = [
     { key: 'summary', label: '报销详情', status: 'INFO', description: `${record.reportNo} · ${formatMoney(record.reimbursableCents)}` },
     { key: 'invoice', label: '发票检查', status: invoiceStatus.status, description: invoiceStatus.description },
     { key: 'policy', label: '费用政策', status: policyStatus.status, description: policyStatus.description },
     { key: 'budget', label: '预算影响', status: budgetStatus.status, description: budgetStatus.description },
+    { key: 'voucher', label: '凭证草稿', status: voucherStatusSummary.status, description: voucherStatusSummary.description },
   ];
   const invoiceItemOptions = (record.items ?? [])
     .filter((item): item is ExpenseReportItemRecord & { id: string } => Boolean(item.id))
@@ -2661,6 +3416,15 @@ function ExpenseReportDetail({
               </div>
             ) : null}
           </>
+        ) : null}
+        {activeSection === 'voucher' ? (
+          <VoucherPanel
+            canConfirm={canConfirmVoucher}
+            canGenerate={canGenerateVoucher}
+            record={record}
+            onConfirm={onConfirmVoucher}
+            onGenerate={onGenerateVoucher}
+          />
         ) : null}
       </div>
 
@@ -2879,6 +3643,19 @@ function budgetSectionStatus(checks: ExpenseBudgetCheckRecord[], occupations: Bu
   return { status: 'PASS', description: occupations.length ? `${occupations.length} 条预算记录` : lastCheckText(checks) };
 }
 
+function voucherSectionStatus(status: ExpenseStatus, vouchers: VoucherRecord[]): DetailSectionSummary {
+  if (status === 'PAID' && !vouchers.length) {
+    return { status: 'PENDING', description: '可生成草稿' };
+  }
+  if (vouchers.some((voucher) => voucher.status === 'DRAFT')) {
+    return { status: 'WARNING', description: `${vouchers.filter((voucher) => voucher.status === 'DRAFT').length} 张待确认` };
+  }
+  if (vouchers.some((voucher) => voucher.status === 'CONFIRMED')) {
+    return { status: 'PASS', description: `${vouchers.filter((voucher) => voucher.status === 'CONFIRMED').length} 张已确认` };
+  }
+  return { status: 'PENDING', description: '付款后生成' };
+}
+
 function lastCheckText(checks: Array<{ createdAt: string }>) {
   const latest = checks.map((check) => dayjs(check.createdAt)).sort((left, right) => right.valueOf() - left.valueOf())[0];
   return latest?.isValid() ? latest.format('MM-DD HH:mm') : '已检查';
@@ -3079,6 +3856,123 @@ function BudgetImpactPanel({ checks, occupations }: { checks: ExpenseBudgetCheck
       }
     />
   );
+}
+
+function VoucherPanel({
+  canConfirm,
+  canGenerate,
+  record,
+  onConfirm,
+  onGenerate,
+}: {
+  canConfirm: boolean;
+  canGenerate: boolean;
+  record: ExpenseReportRecord;
+  onConfirm: (voucher: VoucherRecord, comment?: string) => void;
+  onGenerate: (comment?: string) => void;
+}) {
+  const [preview, setPreview] = useState<VoucherPreviewResult | null>(null);
+  const previewMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.get<ApiResponse<VoucherPreviewResult>>(`/vouchers/reports/${record.id}/preview`, { headers: authHeaders() });
+      return response.data.data;
+    },
+    onSuccess: setPreview,
+    onError: (error) => message.error(apiErrorMessage(error, '凭证预览失败，请确认单据已付款且科目映射完整')),
+  });
+  const vouchers = record.vouchers ?? [];
+
+  return (
+    <Alert
+      className="invoice-check-panel"
+      type={vouchers.some((voucher) => voucher.status === 'DRAFT') ? 'warning' : vouchers.length ? 'success' : 'info'}
+      showIcon
+      message={
+        <Space wrap>
+          <Text>凭证草稿</Text>
+          <VoucherSummaryTags vouchers={vouchers} />
+        </Space>
+      }
+      description={
+        <Space direction="vertical" className="detail-check-panel-body">
+          <Space>
+            <Button loading={previewMutation.isPending} disabled={record.status !== 'PAID'} onClick={() => previewMutation.mutate()}>
+              预览
+            </Button>
+            <Button type="primary" disabled={!canGenerate || record.status !== 'PAID'} onClick={() => openVoucherGenerateConfirm(record, (_record, comment) => onGenerate(comment))}>
+              生成草稿
+            </Button>
+          </Space>
+          {vouchers.length ? <VoucherList vouchers={vouchers} canConfirm={canConfirm} onConfirm={onConfirm} /> : <Text type="secondary">已付款单据可预览并生成凭证草稿。</Text>}
+          {preview ? (
+            <Modal title={`${preview.reportNo} 凭证预览`} open={Boolean(preview)} footer={null} onCancel={() => setPreview(null)} width={980}>
+              <VoucherList vouchers={preview.vouchers} canConfirm={false} onConfirm={onConfirm} />
+            </Modal>
+          ) : null}
+        </Space>
+      }
+    />
+  );
+}
+
+function VoucherList({ vouchers, canConfirm, onConfirm }: { vouchers: VoucherRecord[]; canConfirm: boolean; onConfirm: (voucher: VoucherRecord, comment?: string) => void }) {
+  return (
+    <Table
+      rowKey={(voucher) => voucher.id ?? `${voucher.voucherType}-${voucher.paymentId ?? 'preview'}`}
+      dataSource={vouchers}
+      columns={voucherColumns(canConfirm, onConfirm)}
+      expandable={{ expandedRowRender: (voucher) => <VoucherLines voucher={voucher} /> }}
+      pagination={false}
+      scroll={{ x: 920 }}
+      size="small"
+    />
+  );
+}
+
+function VoucherLines({ voucher }: { voucher: VoucherRecord }) {
+  return (
+    <Table
+      rowKey={(line) => line.id ?? `${line.lineNo ?? line.accountSubjectCode}-${line.direction}-${line.amountCents}`}
+      dataSource={voucher.lines}
+      columns={voucherLineColumns()}
+      pagination={false}
+      scroll={{ x: 820 }}
+      size="small"
+    />
+  );
+}
+
+function voucherColumns(canConfirm: boolean, onConfirm: (voucher: VoucherRecord, comment?: string) => void): ColumnsType<VoucherRecord> {
+  return [
+    { title: '凭证号', dataIndex: 'voucherNo', width: 160, render: (value?: string) => value ?? '预览' },
+    { title: '类型', dataIndex: 'voucherType', width: 130, render: voucherTypeName },
+    { title: '状态', dataIndex: 'status', width: 110, render: (status?: VoucherStatus) => (status ? <VoucherStatusTag status={status} /> : <Tag>预览</Tag>) },
+    { title: '摘要', dataIndex: 'summary', width: 240 },
+    { title: '借方合计', dataIndex: 'totalDebitCents', width: 120, align: 'right', render: formatMoney },
+    { title: '贷方合计', dataIndex: 'totalCreditCents', width: 120, align: 'right', render: formatMoney },
+    { title: '生成时间', dataIndex: 'generatedAt', width: 160, render: (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
+    {
+      title: '操作',
+      width: 100,
+      render: (_: unknown, voucher) => (
+        <Button size="small" disabled={!canConfirm || !voucher.id || voucher.status !== 'DRAFT'} onClick={() => openVoucherConfirm(voucher, onConfirm)}>
+          确认
+        </Button>
+      ),
+    },
+  ];
+}
+
+function voucherLineColumns(): ColumnsType<VoucherLineRecord> {
+  return [
+    { title: '行号', dataIndex: 'lineNo', width: 80, render: (value?: number) => value ?? '-' },
+    { title: '方向', dataIndex: 'direction', width: 90, render: voucherLineDirectionName },
+    { title: '科目', dataIndex: 'accountSubjectCode', width: 220, render: (_: string, line) => `${line.accountSubjectCode} ${line.accountSubject?.name ?? ''}`.trim() },
+    { title: '金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
+    { title: '摘要', dataIndex: 'summary', width: 260 },
+    { title: '来源明细', dataIndex: 'itemId', width: 140, render: (value?: string | null) => value?.slice(0, 8) ?? '-' },
+    { title: '付款记录', dataIndex: 'paymentId', width: 140, render: (value?: string | null) => value?.slice(0, 8) ?? '-' },
+  ];
 }
 
 function budgetCheckColumns(): ColumnsType<ExpenseBudgetCheckRecord> {
@@ -3320,6 +4214,15 @@ function PaymentStatusTag({ status }: { status: PaymentStatus }) {
   return status === 'SUCCESS' ? <Tag color="green">成功</Tag> : <Tag color="error">失败</Tag>;
 }
 
+function VoucherStatusTag({ status }: { status: VoucherStatus }) {
+  const config = {
+    DRAFT: { color: 'purple', label: '草稿' },
+    CONFIRMED: { color: 'green', label: '已确认' },
+    VOIDED: { color: 'default', label: '已作废' },
+  }[status];
+  return <Tag color={config.color}>{config.label}</Tag>;
+}
+
 function MoneyField({ name, label }: { name: Array<string | number>; label: string }) {
   return (
     <Form.Item
@@ -3556,6 +4459,41 @@ function paymentMethodName(method: PaymentMethod) {
   return names[method];
 }
 
+function voucherTypeName(type: VoucherType) {
+  const names = {
+    EXPENSE_ACCRUAL: '费用确认',
+    PAYMENT: '付款核销',
+  };
+  return names[type];
+}
+
+function voucherLineDirectionName(direction: VoucherLineDirection) {
+  return direction === 'DEBIT' ? '借方' : '贷方';
+}
+
+function accountCategoryName(category: GlAccountCategory) {
+  const names = {
+    ASSET: '资产',
+    LIABILITY: '负债',
+    EQUITY: '权益',
+    COST: '成本',
+    EXPENSE: '费用',
+    REVENUE: '收入',
+    TAX: '税金',
+  };
+  return names[category];
+}
+
+function accountMappingPurposeName(purpose: GlAccountMappingPurpose) {
+  const names = {
+    EXPENSE_TYPE: '费用类型',
+    EMPLOYEE_PAYABLE: '员工往来',
+    INPUT_TAX: '进项税',
+    BANK_PAYMENT: '银行付款',
+  };
+  return names[purpose];
+}
+
 function policyActionName(action: ExpensePolicyAction) {
   const names = {
     WARNING: '提醒',
@@ -3607,6 +4545,8 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     FINANCE_ADJUST: '财务修正',
     PAYMENT_REGISTER: '付款登记',
     PAYMENT_FAIL: '付款失败',
+    VOUCHER_DRAFT: '生成凭证草稿',
+    VOUCHER_CONFIRM: '确认凭证草稿',
     VOID: '作废',
   };
   return names[action];
@@ -4010,6 +4950,63 @@ function paymentPayload(values: PaymentFormValues) {
     payeeAccount: emptyToUndefined(values.payeeAccount),
     failureReason: emptyToUndefined(values.failureReason),
     comment: emptyToUndefined(values.comment),
+  };
+}
+
+function accountSubjectPayload(values: AccountSubjectFormValues, editing: boolean) {
+  return {
+    code: editing ? undefined : values.code?.trim(),
+    name: values.name,
+    category: values.category,
+    normalBalance: values.normalBalance,
+    description: emptyToUndefined(values.description),
+    status: editing ? values.status : undefined,
+  };
+}
+
+function accountMappingPayload(values: AccountMappingFormValues, editing: boolean) {
+  return {
+    purpose: values.purpose,
+    expenseTypeCode: emptyToUndefined(values.expenseTypeCode),
+    applicantId: emptyToUndefined(values.applicantId),
+    paymentMethod: values.paymentMethod,
+    payerAccount: emptyToUndefined(values.payerAccount),
+    departmentId: emptyToUndefined(values.departmentId),
+    costCenterId: emptyToUndefined(values.costCenterId),
+    projectId: emptyToUndefined(values.projectId),
+    accountSubjectCode: values.accountSubjectCode,
+    priority: Number(values.priority ?? 100),
+    effectiveFrom: values.effectiveFrom?.toISOString(),
+    effectiveTo: values.effectiveTo?.toISOString(),
+    status: editing ? values.status : undefined,
+  };
+}
+
+function accountSubjectToForm(record: AccountSubjectRecord): AccountSubjectFormValues {
+  return {
+    name: record.name,
+    category: record.category,
+    normalBalance: record.normalBalance,
+    description: record.description ?? undefined,
+    status: record.status,
+  };
+}
+
+function accountMappingToForm(record: AccountMappingRecord): AccountMappingFormValues {
+  return {
+    purpose: record.purpose,
+    expenseTypeCode: record.expenseTypeCode ?? undefined,
+    applicantId: record.applicantId ?? undefined,
+    paymentMethod: record.paymentMethod ?? undefined,
+    payerAccount: record.payerAccount ?? undefined,
+    departmentId: record.departmentId ?? undefined,
+    costCenterId: record.costCenterId ?? undefined,
+    projectId: record.projectId ?? undefined,
+    accountSubjectCode: record.accountSubjectCode,
+    priority: record.priority,
+    effectiveFrom: record.effectiveFrom ? dayjs(record.effectiveFrom) : undefined,
+    effectiveTo: record.effectiveTo ? dayjs(record.effectiveTo) : undefined,
+    status: record.status,
   };
 }
 
