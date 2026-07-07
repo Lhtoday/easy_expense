@@ -107,3 +107,10 @@ npm.cmd run build --workspace frontend
 - 已新增前端 `会计设置` 菜单，支持维护 `gl_account_subjects` 会计科目和 `gl_account_mappings` 科目映射，覆盖费用类型、员工往来、进项税和银行付款映射用途。
 - 已修复已有本地数据库中默认权限不自动补齐的问题：认证启动时会 upsert `DEFAULT_PERMISSIONS`，并为 `ADMIN` 角色补上缺失权限，确保 `gl:voucher:*` 和 `gl:account:*` 能显示对应菜单。
 - 验证已通过：`npm.cmd run build --workspace frontend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace backend`、`npm.cmd run lint --workspace backend`、`npm.cmd run test --workspace backend`。
+
+## 2026-07-07 验收记录
+
+- 已新增可重复执行的 `scripts/seed-phase9-accounts.sql`，用于生成 Phase 9 凭证草稿所需的基础会计科目和默认科目映射。
+- 本地已写入 11 个会计科目和 11 条科目映射，覆盖差旅、交通、招待、办公、其他费用、员工报销应付款、进项税、银行转账、现金和公务卡付款。
+- 已修复 `account-subjects`、`account-mappings` 和 `vouchers/reports` 查询 DTO 缺少数字转换导致前端分页请求返回 400 的问题。
+- 用户已在页面完成流程测试，反馈凭证相关流程可跑通。

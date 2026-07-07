@@ -1,12 +1,15 @@
 import { ExpenseReportStatus, GlAccountCategory, GlAccountMappingPurpose, GlNormalBalance, GlStatus, PaymentMethod } from '@prisma/client';
+import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsISO8601, IsOptional, IsString, Min } from 'class-validator';
 
 export class AccountSubjectListQueryDto {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   page?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   pageSize?: number;
 
@@ -61,10 +64,12 @@ export class UpdateAccountSubjectDto {
 
 export class AccountMappingListQueryDto {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   page?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   pageSize?: number;
 
@@ -113,6 +118,7 @@ export class CreateAccountMappingDto {
   accountSubjectCode!: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   priority?: number;
@@ -164,6 +170,7 @@ export class UpdateAccountMappingDto {
   accountSubjectCode?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   priority?: number;
@@ -195,10 +202,12 @@ export class ConfirmVoucherDto {
 
 export class VoucherReportListQueryDto {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   page?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   pageSize?: number;
 
