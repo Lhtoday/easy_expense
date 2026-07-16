@@ -191,6 +191,7 @@ interface ExpenseReportLogRecord {
     | 'PAYMENT_FAIL'
     | 'VOUCHER_DRAFT'
     | 'VOUCHER_CONFIRM'
+    | 'VOUCHER_VOID'
     | 'VOID';
   fromStatus?: ExpenseStatus | null;
   toStatus: ExpenseStatus;
@@ -243,7 +244,7 @@ interface FinanceReviewRecord {
 
 interface FinanceReviewCheckRecord {
   code: string;
-  category: 'ACCOUNTING_DIMENSION' | 'TAX' | 'INVOICE';
+  category: 'ACCOUNTING_DIMENSION' | 'TAX' | 'INVOICE' | 'BUDGET';
   severity: 'PASS' | 'WARNING' | 'BLOCK';
   message: string;
   itemId?: string;
@@ -1179,6 +1180,20 @@ export function App() {
     onError: (error) => messageApi.error(apiErrorMessage(error, '凭证确认失败，请检查草稿状态、借贷平衡或权限')),
   });
 
+  const voidVoucherDraftsMutation = useMutation({
+    mutationFn: async ({ reportId, comment }: { reportId: string; comment?: string }) =>
+      api.post(`/vouchers/reports/${reportId}/void-drafts`, { comment }, { headers: authHeaders() }),
+    onSuccess: async (_response, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+      await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
+      if (expenseViewing?.id === variables.reportId) {
+        await refreshExpenseDetail(variables.reportId);
+      }
+      messageApi.success('凭证草稿已撤销');
+    },
+    onError: (error) => messageApi.error(apiErrorMessage(error, '凭证草稿撤销失败，请检查是否已有确认凭证或权限不足')),
+  });
+
   const loginMutation = useMutation({
     mutationFn: async (values: { email: string; password: string }) => {
       const response = await api.post<ApiResponse<{ accessToken: string; user: SessionUser }>>('/auth/login', values);
@@ -1484,12 +1499,13 @@ export function App() {
               canGenerate={canGenerateVoucher}
               data={vouchersQuery.data}
               keyword={voucherKeyword}
-              loading={vouchersQuery.isLoading || generateVoucherMutation.isPending || confirmVoucherMutation.isPending}
+              loading={vouchersQuery.isLoading || generateVoucherMutation.isPending || confirmVoucherMutation.isPending || voidVoucherDraftsMutation.isPending}
               page={voucherPage}
               pageSize={voucherPageSize}
               status={voucherStatus}
               onConfirm={(voucher, comment) => voucher.id && confirmVoucherMutation.mutate({ voucherId: voucher.id, comment })}
               onGenerate={(record, comment) => generateVoucherMutation.mutate({ reportId: record.id, comment })}
+              onVoidDrafts={(record, comment) => voidVoucherDraftsMutation.mutate({ reportId: record.id, comment })}
               onPageChange={(page, pageSize) => {
                 setVoucherPage(page);
                 setVoucherPageSize(pageSize);
@@ -1595,6 +1611,7 @@ export function App() {
             referenceData={referenceData}
             onConfirmVoucher={(voucher, comment) => voucher.id && confirmVoucherMutation.mutate({ voucherId: voucher.id, comment })}
             onGenerateVoucher={(comment) => generateVoucherMutation.mutate({ reportId: expenseViewing.id, comment })}
+            onVoidVoucherDrafts={(comment) => voidVoucherDraftsMutation.mutate({ reportId: expenseViewing.id, comment })}
             onChanged={() => refreshExpenseDetail(expenseViewing.id)}
           />
         ) : null}
@@ -2546,6 +2563,7 @@ function VouchersView({
   status,
   onConfirm,
   onGenerate,
+  onVoidDrafts,
   onPageChange,
   onSearch,
   onStatusChange,
@@ -2561,6 +2579,7 @@ function VouchersView({
   status?: ExpenseStatus;
   onConfirm: (voucher: VoucherRecord, comment?: string) => void;
   onGenerate: (record: ExpenseReportRecord, comment?: string) => void;
+  onVoidDrafts: (record: ExpenseReportRecord, comment?: string) => void;
   onPageChange: (page: number, pageSize: number) => void;
   onSearch: (keyword: string) => void;
   onStatusChange: (status?: ExpenseStatus) => void;
@@ -2595,7 +2614,7 @@ function VouchersView({
         rowKey="id"
         loading={loading || previewMutation.isPending}
         dataSource={data?.items ?? []}
-        columns={voucherReportColumns(canGenerate, canConfirm, (record) => previewMutation.mutate(record.id), onGenerate, onConfirm, onView)}
+        columns={voucherReportColumns(canGenerate, canConfirm, (record) => previewMutation.mutate(record.id), onGenerate, onConfirm, onVoidDrafts, onView)}
         scroll={{ x: 1420 }}
         pagination={{ current: page, pageSize, total: data?.total, showSizeChanger: true }}
         onChange={(pagination) => onPageChange(pagination.current ?? 1, pagination.pageSize ?? pageSize)}
@@ -2613,6 +2632,7 @@ function voucherReportColumns(
   onPreview: (record: ExpenseReportRecord) => void,
   onGenerate: (record: ExpenseReportRecord, comment?: string) => void,
   onConfirm: (voucher: VoucherRecord, comment?: string) => void,
+  onVoidDrafts: (record: ExpenseReportRecord, comment?: string) => void,
   onView: (record: ExpenseReportRecord) => void,
 ): ColumnsType<ExpenseReportRecord> {
   return [
@@ -2636,8 +2656,9 @@ function voucherReportColumns(
       fixed: 'right',
       render: (_: unknown, record) => {
         const draftVouchers = (record.vouchers ?? []).filter((voucher) => voucher.status === 'DRAFT');
+        const confirmedVouchers = (record.vouchers ?? []).filter((voucher) => voucher.status === 'CONFIRMED');
         return (
-          <Space>
+          <Space wrap>
             <Button size="small" icon={<EyeOutlined />} onClick={() => onView(record)}>
               查看
             </Button>
@@ -2649,6 +2670,9 @@ function voucherReportColumns(
             </Button>
             <Button size="small" disabled={!canConfirm || draftVouchers.length !== 1} onClick={() => draftVouchers[0] && openVoucherConfirm(draftVouchers[0], onConfirm)}>
               确认
+            </Button>
+            <Button size="small" danger disabled={!canConfirm || record.status !== 'VOUCHER_DRAFTED' || !draftVouchers.length || confirmedVouchers.length > 0} onClick={() => openVoucherVoidConfirm(record, onVoidDrafts)}>
+              撤销草稿
             </Button>
           </Space>
         );
@@ -2698,6 +2722,22 @@ function openVoucherConfirm(voucher: VoucherRecord, onConfirm: (voucher: Voucher
     ),
     okText: '确认',
     onOk: () => onConfirm(voucher, comment.trim() || undefined),
+  });
+}
+
+function openVoucherVoidConfirm(record: ExpenseReportRecord, onVoid: (record: ExpenseReportRecord, comment?: string) => void) {
+  let comment = '';
+  Modal.confirm({
+    title: '撤销凭证草稿',
+    content: (
+      <Space direction="vertical" className="detail-check-panel-body">
+        <Text>{record.reportNo} · 撤销后单据回到已付款，可重新生成凭证草稿。</Text>
+        <Input.TextArea rows={3} placeholder="撤销原因" onChange={(event) => { comment = event.target.value; }} />
+      </Space>
+    ),
+    okText: '撤销草稿',
+    okButtonProps: { danger: true },
+    onOk: () => onVoid(record, comment.trim() || undefined),
   });
 }
 
@@ -3187,6 +3227,7 @@ function ExpenseReportDetail({
   onChanged,
   onConfirmVoucher,
   onGenerateVoucher,
+  onVoidVoucherDrafts,
 }: {
   canBudgetWrite: boolean;
   canConfirmVoucher: boolean;
@@ -3198,6 +3239,7 @@ function ExpenseReportDetail({
   onChanged: () => Promise<void>;
   onConfirmVoucher: (voucher: VoucherRecord, comment?: string) => void;
   onGenerateVoucher: (comment?: string) => void;
+  onVoidVoucherDrafts: (comment?: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [attachmentForm] = Form.useForm<AttachmentFormValues>();
@@ -3205,6 +3247,8 @@ function ExpenseReportDetail({
   const [financeAdjustmentForm] = Form.useForm<FinanceReviewAdjustmentFormValues>();
   const [attachmentFiles, setAttachmentFiles] = useState<UploadFile[]>([]);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
+  const [statusLogModalOpen, setStatusLogModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<ExpenseInvoiceRecord | null>(null);
   const [adjustingItem, setAdjustingItem] = useState<ExpenseReportItemRecord | null>(null);
   const [activeSection, setActiveSection] = useState<DetailSectionKey>('summary');
@@ -3306,6 +3350,8 @@ function ExpenseReportDetail({
   const policyStatus = policySectionStatus(record.policyChecks ?? []);
   const budgetStatus = budgetSectionStatus(record.budgetChecks ?? [], record.budgetOccupations ?? []);
   const voucherStatusSummary = voucherSectionStatus(record.status, record.vouchers ?? []);
+  const attachmentCount = record.attachments?.length ?? 0;
+  const statusLogCount = record.logs?.length ?? 0;
   const detailSections: Array<{ key: DetailSectionKey; label: string; status: DetailSectionStatus; description: string }> = [
     { key: 'summary', label: '报销详情', status: 'INFO', description: `${record.reportNo} · ${formatMoney(record.reimbursableCents)}` },
     { key: 'invoice', label: '发票检查', status: invoiceStatus.status, description: invoiceStatus.description },
@@ -3392,6 +3438,15 @@ function ExpenseReportDetail({
         <Descriptions.Item label="实付金额">{formatMoney(record.paidAmountCents)}</Descriptions.Item>
       </Descriptions>
 
+      <div className="section-toolbar">
+        <Button icon={<FolderOpenOutlined />} onClick={() => setAttachmentModalOpen(true)}>
+          附件 {attachmentCount}
+        </Button>
+        <Button icon={<FileTextOutlined />} onClick={() => setStatusLogModalOpen(true)}>
+          状态日志 {statusLogCount}
+        </Button>
+      </div>
+
       <div className="expense-detail-tab-panel">
         {activeSection === 'invoice' ? <InvoiceCheckPanel summary={invoiceSummary} /> : null}
         {activeSection === 'policy' ? (
@@ -3424,6 +3479,7 @@ function ExpenseReportDetail({
             record={record}
             onConfirm={onConfirmVoucher}
             onGenerate={onGenerateVoucher}
+            onVoidDrafts={onVoidVoucherDrafts}
           />
         ) : null}
       </div>
@@ -3435,54 +3491,6 @@ function ExpenseReportDetail({
         columns={expenseItemColumns(invoiceSummary, financeAdjustable, openFinanceAdjustmentModal)}
         pagination={false}
         scroll={{ x: 1080 }}
-        size="small"
-      />
-
-      <Divider orientation="left">附件</Divider>
-      {editable ? (
-        <Form
-          form={attachmentForm}
-          className="expense-sub-form"
-          layout="vertical"
-          onFinish={(values) => uploadAttachmentMutation.mutate(values)}
-          initialValues={{ category: 'GENERAL' }}
-        >
-          <Form.Item label="文件" required>
-            <Upload
-              beforeUpload={() => false}
-              fileList={attachmentFiles}
-              maxCount={1}
-              onChange={({ fileList }) => setAttachmentFiles(fileList)}
-            >
-              <Button icon={<UploadOutlined />}>选择文件</Button>
-            </Upload>
-          </Form.Item>
-          <Form.Item name="category" label="类型">
-            <Select
-              options={[
-                { label: '普通附件', value: 'GENERAL' },
-                { label: '发票影像', value: 'INVOICE_IMAGE' },
-                { label: '付款凭证', value: 'PAYMENT_PROOF' },
-                { label: '其他', value: 'OTHER' },
-              ]}
-            />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" disabled={!attachmentFiles.length} loading={uploadAttachmentMutation.isPending}>
-            上传附件
-          </Button>
-        </Form>
-      ) : null}
-      <Table
-        rowKey="id"
-        dataSource={record.attachments ?? []}
-        columns={expenseAttachmentColumns(
-          editable,
-          (attachment) => void openAttachmentFile(attachment, 'preview'),
-          (attachment) => void openAttachmentFile(attachment, 'download'),
-          (id) => removeAttachmentMutation.mutate(id),
-        )}
-        pagination={false}
-        scroll={{ x: 900 }}
         size="small"
       />
 
@@ -3506,6 +3514,76 @@ function ExpenseReportDetail({
           />
         </>
       ) : null}
+      <Modal
+        title={`附件 (${attachmentCount})`}
+        open={attachmentModalOpen}
+        onCancel={() => setAttachmentModalOpen(false)}
+        footer={null}
+        width={980}
+      >
+        {editable ? (
+          <Form
+            form={attachmentForm}
+            className="expense-sub-form"
+            layout="vertical"
+            onFinish={(values) => uploadAttachmentMutation.mutate(values)}
+            initialValues={{ category: 'GENERAL' }}
+          >
+            <Form.Item label="文件" required>
+              <Upload
+                beforeUpload={() => false}
+                fileList={attachmentFiles}
+                maxCount={1}
+                onChange={({ fileList }) => setAttachmentFiles(fileList)}
+              >
+                <Button icon={<UploadOutlined />}>选择文件</Button>
+              </Upload>
+            </Form.Item>
+            <Form.Item name="category" label="类型">
+              <Select
+                options={[
+                  { label: '普通附件', value: 'GENERAL' },
+                  { label: '发票影像', value: 'INVOICE_IMAGE' },
+                  { label: '付款凭证', value: 'PAYMENT_PROOF' },
+                  { label: '其他', value: 'OTHER' },
+                ]}
+              />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" disabled={!attachmentFiles.length} loading={uploadAttachmentMutation.isPending}>
+              上传附件
+            </Button>
+          </Form>
+        ) : null}
+        <Table
+          rowKey="id"
+          dataSource={record.attachments ?? []}
+          columns={expenseAttachmentColumns(
+            editable,
+            (attachment) => void openAttachmentFile(attachment, 'preview'),
+            (attachment) => void openAttachmentFile(attachment, 'download'),
+            (id) => removeAttachmentMutation.mutate(id),
+          )}
+          pagination={false}
+          scroll={{ x: 900 }}
+          size="small"
+        />
+      </Modal>
+      <Modal
+        title={`状态日志 (${statusLogCount})`}
+        open={statusLogModalOpen}
+        onCancel={() => setStatusLogModalOpen(false)}
+        footer={null}
+        width={860}
+      >
+        <Table
+          rowKey="id"
+          dataSource={record.logs ?? []}
+          columns={expenseLogColumns()}
+          pagination={false}
+          scroll={{ x: 760 }}
+          size="small"
+        />
+      </Modal>
       <Modal
         title={editingInvoice ? '编辑发票' : '登记发票'}
         open={invoiceModalOpen}
@@ -3532,48 +3610,6 @@ function ExpenseReportDetail({
       >
         <FinanceAdjustmentForm form={financeAdjustmentForm} referenceData={referenceData} onFinish={(values) => adjustFinanceItemMutation.mutate(values)} />
       </Modal>
-
-      <Divider orientation="left">状态日志</Divider>
-      <Table
-        rowKey="id"
-        dataSource={record.logs ?? []}
-        columns={expenseLogColumns()}
-        pagination={false}
-        scroll={{ x: 760 }}
-        size="small"
-      />
-
-      <Divider orientation="left">审批记录</Divider>
-      <Table
-        rowKey="id"
-        dataSource={record.approvalInstances ?? []}
-        columns={approvalInstanceColumns()}
-        expandable={{
-          expandedRowRender: (instance) => (
-            <div className="approval-expanded">
-              <Table
-                rowKey="id"
-                dataSource={instance.tasks}
-                columns={approvalTaskDetailColumns()}
-                pagination={false}
-                size="small"
-                scroll={{ x: 760 }}
-              />
-              <Table
-                rowKey="id"
-                dataSource={instance.logs}
-                columns={approvalLogColumns()}
-                pagination={false}
-                size="small"
-                scroll={{ x: 760 }}
-              />
-            </div>
-          ),
-        }}
-        pagination={false}
-        scroll={{ x: 860 }}
-        size="small"
-      />
 
       <Divider orientation="left">付款记录</Divider>
       <Table
@@ -3729,7 +3765,7 @@ function financeReviewCheckColumns(): ColumnsType<FinanceReviewCheckRecord> {
 
 function sortFinanceReviewChecks(checks: FinanceReviewCheckRecord[]) {
   const severityRank = { BLOCK: 0, WARNING: 1, PASS: 2 };
-  const categoryRank = { INVOICE: 0, TAX: 1, ACCOUNTING_DIMENSION: 2 };
+  const categoryRank = { BUDGET: 0, INVOICE: 1, TAX: 2, ACCOUNTING_DIMENSION: 3 };
   return [...checks].sort((left, right) => severityRank[left.severity] - severityRank[right.severity] || categoryRank[left.category] - categoryRank[right.category]);
 }
 
@@ -3864,12 +3900,14 @@ function VoucherPanel({
   record,
   onConfirm,
   onGenerate,
+  onVoidDrafts,
 }: {
   canConfirm: boolean;
   canGenerate: boolean;
   record: ExpenseReportRecord;
   onConfirm: (voucher: VoucherRecord, comment?: string) => void;
   onGenerate: (comment?: string) => void;
+  onVoidDrafts: (comment?: string) => void;
 }) {
   const [preview, setPreview] = useState<VoucherPreviewResult | null>(null);
   const previewMutation = useMutation({
@@ -3881,6 +3919,8 @@ function VoucherPanel({
     onError: (error) => message.error(apiErrorMessage(error, '凭证预览失败，请确认单据已付款且科目映射完整')),
   });
   const vouchers = record.vouchers ?? [];
+  const draftVouchers = vouchers.filter((voucher) => voucher.status === 'DRAFT');
+  const confirmedVouchers = vouchers.filter((voucher) => voucher.status === 'CONFIRMED');
 
   return (
     <Alert
@@ -3895,12 +3935,15 @@ function VoucherPanel({
       }
       description={
         <Space direction="vertical" className="detail-check-panel-body">
-          <Space>
+          <Space wrap>
             <Button loading={previewMutation.isPending} disabled={record.status !== 'PAID'} onClick={() => previewMutation.mutate()}>
               预览
             </Button>
             <Button type="primary" disabled={!canGenerate || record.status !== 'PAID'} onClick={() => openVoucherGenerateConfirm(record, (_record, comment) => onGenerate(comment))}>
               生成草稿
+            </Button>
+            <Button danger disabled={!canConfirm || record.status !== 'VOUCHER_DRAFTED' || !draftVouchers.length || confirmedVouchers.length > 0} onClick={() => openVoucherVoidConfirm(record, (_record, comment) => onVoidDrafts(comment))}>
+              撤销草稿
             </Button>
           </Space>
           {vouchers.length ? <VoucherList vouchers={vouchers} canConfirm={canConfirm} onConfirm={onConfirm} /> : <Text type="secondary">已付款单据可预览并生成凭证草稿。</Text>}
@@ -3921,11 +3964,20 @@ function VoucherList({ vouchers, canConfirm, onConfirm }: { vouchers: VoucherRec
       rowKey={(voucher) => voucher.id ?? `${voucher.voucherType}-${voucher.paymentId ?? 'preview'}`}
       dataSource={vouchers}
       columns={voucherColumns(canConfirm, onConfirm)}
-      expandable={{ expandedRowRender: (voucher) => <VoucherLines voucher={voucher} /> }}
+      expandable={{ expandedRowRender: (voucher) => <VoucherExpanded voucher={voucher} /> }}
       pagination={false}
       scroll={{ x: 920 }}
       size="small"
     />
+  );
+}
+
+function VoucherExpanded({ voucher }: { voucher: VoucherRecord }) {
+  return (
+    <Space direction="vertical" className="detail-check-panel-body">
+      <VoucherLines voucher={voucher} />
+      {voucher.logs?.length ? <Table rowKey="id" dataSource={voucher.logs} columns={voucherLogColumns()} pagination={false} scroll={{ x: 720 }} size="small" /> : null}
+    </Space>
   );
 }
 
@@ -3940,6 +3992,17 @@ function VoucherLines({ voucher }: { voucher: VoucherRecord }) {
       size="small"
     />
   );
+}
+
+function voucherLogColumns(): ColumnsType<VoucherLogRecord> {
+  return [
+    { title: '动作', dataIndex: 'action', width: 130, render: voucherActionName },
+    { title: '前状态', dataIndex: 'fromStatus', width: 110, render: (status?: VoucherStatus | null) => (status ? <VoucherStatusTag status={status} /> : '-') },
+    { title: '后状态', dataIndex: 'toStatus', width: 110, render: (status?: VoucherStatus | null) => (status ? <VoucherStatusTag status={status} /> : '-') },
+    { title: '操作人', dataIndex: 'operator', width: 120, render: (operator?: VoucherLogRecord['operator']) => operator?.name ?? '-' },
+    { title: '意见', dataIndex: 'comment', width: 220, render: (value?: string | null) => value ?? '-' },
+    { title: '时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+  ];
 }
 
 function voucherColumns(canConfirm: boolean, onConfirm: (voucher: VoucherRecord, comment?: string) => void): ColumnsType<VoucherRecord> {
@@ -4138,54 +4201,6 @@ function expenseLogColumns(): ColumnsType<ExpenseReportLogRecord> {
           {record.fromStatus ? <ExpenseStatusTag status={record.fromStatus} /> : <Text type="secondary">初始</Text>}
           <Text type="secondary">→</Text>
           <ExpenseStatusTag status={record.toStatus} />
-        </Space>
-      ),
-    },
-    { title: '意见', dataIndex: 'comment', width: 220, render: (comment?: string | null) => comment ?? '-' },
-  ];
-}
-
-function approvalInstanceColumns(): ColumnsType<ExpenseApprovalInstanceRecord> {
-  return [
-    { title: '流程', dataIndex: 'flowConfig', width: 180, render: (flow: ExpenseApprovalInstanceRecord['flowConfig']) => flow.name },
-    { title: '状态', dataIndex: 'status', width: 120, render: approvalInstanceStatusName },
-    { title: '开始时间', dataIndex: 'startedAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
-    { title: '完成时间', dataIndex: 'completedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
-    {
-      title: '当前任务',
-      width: 240,
-      render: (_: unknown, instance) => {
-        const pending = instance.tasks.find((task) => task.status === 'PENDING');
-        return pending ? `${pending.nodeName} · ${pending.assignee.name}` : '-';
-      },
-    },
-  ];
-}
-
-function approvalTaskDetailColumns(): ColumnsType<Omit<ApprovalTaskRecord, 'report'>> {
-  return [
-    { title: '节点', dataIndex: 'nodeName', width: 140 },
-    { title: '审批人', dataIndex: 'assignee', width: 120, render: (assignee: ApprovalTaskRecord['assignee']) => assignee.name },
-    { title: '状态', dataIndex: 'status', width: 120, render: (status: ApprovalTaskStatus) => <ApprovalTaskStatusTag status={status} /> },
-    { title: '创建时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
-    { title: '完成时间', dataIndex: 'completedAt', width: 160, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-') },
-    { title: '意见', dataIndex: 'comment', width: 220, render: (comment?: string | null) => comment ?? '-' },
-  ];
-}
-
-function approvalLogColumns(): ColumnsType<ApprovalLogRecord> {
-  return [
-    { title: '时间', dataIndex: 'createdAt', width: 160, render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
-    { title: '操作人', dataIndex: 'operator', width: 120, render: (operator: ApprovalLogRecord['operator']) => operator.name },
-    { title: '动作', dataIndex: 'action', width: 120, render: approvalActionName },
-    {
-      title: '任务状态',
-      width: 180,
-      render: (_: unknown, record) => (
-        <Space>
-          {record.fromStatus ? <ApprovalTaskStatusTag status={record.fromStatus} /> : <Text type="secondary">初始</Text>}
-          <Text type="secondary">→</Text>
-          {record.toStatus ? <ApprovalTaskStatusTag status={record.toStatus} /> : <Text type="secondary">-</Text>}
         </Space>
       ),
     },
@@ -4423,6 +4438,7 @@ function FinanceReviewSeverityTag({ severity }: { severity: FinanceReviewCheckRe
 
 function financeReviewCategoryName(category: FinanceReviewCheckRecord['category']) {
   const names = {
+    BUDGET: '预算',
     ACCOUNTING_DIMENSION: '会计维度',
     TAX: '税额',
     INVOICE: '发票',
@@ -4471,6 +4487,15 @@ function voucherLineDirectionName(direction: VoucherLineDirection) {
   return direction === 'DEBIT' ? '借方' : '贷方';
 }
 
+function voucherActionName(action: VoucherAction) {
+  const names = {
+    GENERATE: '生成草稿',
+    CONFIRM: '确认草稿',
+    VOID: '撤销草稿',
+  };
+  return names[action];
+}
+
 function accountCategoryName(category: GlAccountCategory) {
   const names = {
     ASSET: '资产',
@@ -4507,16 +4532,6 @@ function budgetControlModeName(mode: BudgetControlMode) {
   return mode === 'BLOCK' ? '超预算拦截' : '超预算提醒';
 }
 
-function approvalInstanceStatusName(status: ExpenseApprovalInstanceRecord['status']) {
-  const names = {
-    IN_PROGRESS: '审批中',
-    APPROVED: '已通过',
-    REJECTED: '已驳回',
-    WITHDRAWN: '已撤回',
-  };
-  return names[status];
-}
-
 function expenseTypeName(code?: string) {
   return expenseTypeOptions.find((option) => option.value === code)?.label ?? code ?? '-';
 }
@@ -4547,17 +4562,8 @@ function expenseActionName(action: ExpenseReportLogRecord['action']) {
     PAYMENT_FAIL: '付款失败',
     VOUCHER_DRAFT: '生成凭证草稿',
     VOUCHER_CONFIRM: '确认凭证草稿',
+    VOUCHER_VOID: '撤销凭证草稿',
     VOID: '作废',
-  };
-  return names[action];
-}
-
-function approvalActionName(action: ApprovalLogRecord['action']) {
-  const names = {
-    CREATE: '创建任务',
-    APPROVE: '通过',
-    REJECT: '驳回',
-    WITHDRAW: '撤回',
   };
   return names[action];
 }

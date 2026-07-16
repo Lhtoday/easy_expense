@@ -7,7 +7,7 @@ import { PageResult } from '../shared/api-response';
 import { AdjustFinanceReviewItemDto, FinanceReviewListQueryDto } from './finance-review.dto';
 
 export type FinanceReviewCheckSeverity = 'PASS' | 'WARNING' | 'BLOCK';
-export type FinanceReviewCheckCategory = 'ACCOUNTING_DIMENSION' | 'TAX' | 'INVOICE';
+export type FinanceReviewCheckCategory = 'ACCOUNTING_DIMENSION' | 'TAX' | 'INVOICE' | 'BUDGET';
 
 export interface FinanceReviewCheck {
   code: string;
@@ -401,7 +401,11 @@ export class FinanceReviewsService {
       },
       budgetChecks: {
         orderBy: [{ result: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, result: true, message: true, createdAt: true },
+        select: { id: true, itemId: true, budgetId: true, result: true, message: true, createdAt: true },
+      },
+      budgetOccupations: {
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, itemId: true, status: true, occupiedCents: true, approvedCents: true, actualCents: true },
       },
       financeReviews: {
         orderBy: { createdAt: 'asc' },
@@ -418,11 +422,33 @@ export class FinanceReviewsService {
     } satisfies Prisma.ExpenseReportSelect;
   }
 
-  private withFinanceReviewChecks<T extends { items?: unknown[]; invoices?: unknown[]; amountCents: number; taxAmountCents: number; deductibleTaxCents: number; currency?: string; submittedAt?: Date | string | null }>(report: T) {
+  private withFinanceReviewChecks<
+    T extends {
+      items?: unknown[];
+      invoices?: unknown[];
+      budgetChecks?: unknown[];
+      budgetOccupations?: unknown[];
+      amountCents: number;
+      taxAmountCents: number;
+      deductibleTaxCents: number;
+      currency?: string;
+      submittedAt?: Date | string | null;
+    },
+  >(report: T) {
     return { ...report, financeReviewChecks: this.buildFinanceReviewChecks(report) };
   }
 
-  private buildFinanceReviewChecks(report: { items?: unknown[]; invoices?: unknown[]; amountCents: number; taxAmountCents: number; deductibleTaxCents: number; currency?: string; submittedAt?: Date | string | null }): FinanceReviewCheck[] {
+  private buildFinanceReviewChecks(report: {
+    items?: unknown[];
+    invoices?: unknown[];
+    budgetChecks?: unknown[];
+    budgetOccupations?: unknown[];
+    amountCents: number;
+    taxAmountCents: number;
+    deductibleTaxCents: number;
+    currency?: string;
+    submittedAt?: Date | string | null;
+  }): FinanceReviewCheck[] {
     const checks: FinanceReviewCheck[] = [];
     const items = (report.items ?? []) as Array<{
       id: string;
@@ -451,6 +477,20 @@ export class FinanceReviewsService {
       totalAmountCents: number;
       deductibleTaxCents: number;
       currency?: string;
+    }>;
+    const budgetChecks = (report.budgetChecks ?? []) as Array<{
+      id: string;
+      itemId?: string | null;
+      budgetId?: string | null;
+      result: 'PASS' | 'WARNING' | 'BLOCK';
+      message: string;
+    }>;
+    const budgetOccupations = (report.budgetOccupations ?? []) as Array<{
+      itemId: string;
+      status: 'IN_TRANSIT' | 'APPROVED' | 'ACTUAL' | 'RELEASED';
+      occupiedCents: number;
+      approvedCents: number;
+      actualCents: number;
     }>;
 
     const itemAmountCents = items.reduce((sum, item) => sum + item.amountCents, 0);
@@ -642,6 +682,47 @@ export class FinanceReviewsService {
         });
       }
     });
+
+    budgetChecks.forEach((budgetCheck) => {
+      if (budgetCheck.result === 'BLOCK' || !budgetCheck.budgetId) {
+        checks.push({
+          code: budgetCheck.budgetId ? 'BUDGET_CHECK_BLOCK' : 'BUDGET_NOT_CONFIGURED',
+          category: 'BUDGET',
+          severity: 'BLOCK',
+          itemId: budgetCheck.itemId ?? undefined,
+          message: budgetCheck.budgetId ? budgetCheck.message : `${budgetCheck.message} 请先补齐匹配预算后再继续财务审核。`,
+        });
+      } else if (budgetCheck.result === 'WARNING') {
+        checks.push({
+          code: 'BUDGET_CHECK_WARNING',
+          category: 'BUDGET',
+          severity: 'WARNING',
+          itemId: budgetCheck.itemId ?? undefined,
+          message: budgetCheck.message,
+        });
+      }
+    });
+
+    if ('budgetOccupations' in report) {
+      const occupiedItemIds = new Set(
+        budgetOccupations
+          .filter((occupation) => occupation.status !== 'RELEASED' && occupation.occupiedCents + occupation.approvedCents + occupation.actualCents > 0)
+          .map((occupation) => occupation.itemId),
+      );
+      items
+        .filter((item) => item.reimbursableCents > 0)
+        .forEach((item) => {
+          if (!occupiedItemIds.has(item.id)) {
+            checks.push({
+              code: 'BUDGET_OCCUPATION_MISSING',
+              category: 'BUDGET',
+              severity: 'BLOCK',
+              itemId: item.id,
+              message: `${item.description} 没有有效预算占用，不能继续财务审核。请先补齐匹配预算并重新提交。`,
+            });
+          }
+        });
+    }
 
     if (!checks.length) {
       checks.push({

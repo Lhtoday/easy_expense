@@ -234,6 +234,55 @@ describe('FinanceReviewsService', () => {
     expect(budgets.confirmApproved).not.toHaveBeenCalled();
   });
 
+  it('blocks finance approval when budget occupation is missing', async () => {
+    const report = {
+      id: 'report_1',
+      status: ExpenseReportStatus.BUSINESS_APPROVED,
+      amountCents: 10000,
+      taxAmountCents: 600,
+      deductibleTaxCents: 600,
+      items: [
+        {
+          id: 'item_1',
+          description: 'Taxi',
+          accountSubjectCode: '660201',
+          costCenterId: 'cc_1',
+          projectId: 'project_1',
+          amountCents: 10000,
+          taxAmountCents: 600,
+          deductibleTaxCents: 600,
+          reimbursableCents: 10000,
+        },
+      ],
+      invoices: [
+        {
+          id: 'invoice_1',
+          itemId: 'item_1',
+          invoiceNo: 'INV001',
+          duplicateStatus: 'UNIQUE',
+          amountCents: 9400,
+          taxAmountCents: 600,
+          totalAmountCents: 10000,
+          deductibleTaxCents: 600,
+        },
+      ],
+      budgetChecks: [{ id: 'budget_check_1', itemId: 'item_1', budgetId: null, result: 'BLOCK', message: '2026-06 未配置匹配预算' }],
+      budgetOccupations: [],
+    };
+    const tx = {
+      expenseReport: { findFirst: vi.fn().mockResolvedValue(report) },
+      expenseFinanceReview: { create: vi.fn() },
+      expenseReportLog: { create: vi.fn() },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const budgets = { confirmApproved: vi.fn(), releaseReport: vi.fn() };
+    const service = new FinanceReviewsService(prisma as never, budgets as never);
+
+    await expect(service.approve(user, 'report_1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.expenseFinanceReview.create).not.toHaveBeenCalled();
+    expect(budgets.confirmApproved).not.toHaveBeenCalled();
+  });
+
   it('adjusts finance review item fields with audit records and report tax totals', async () => {
     const report = {
       id: 'report_1',

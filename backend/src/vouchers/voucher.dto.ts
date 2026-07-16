@@ -200,6 +200,12 @@ export class ConfirmVoucherDto {
   comment?: string;
 }
 
+export class VoidVoucherDraftsDto {
+  @IsOptional()
+  @IsString()
+  comment?: string;
+}
+
 export class VoucherReportListQueryDto {
   @IsOptional()
   @Type(() => Number)

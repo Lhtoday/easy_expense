@@ -176,4 +176,71 @@ describe('VouchersService', () => {
     expect(tx.expenseReport.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: ExpenseReportStatus.VOUCHER_CONFIRMED }) }));
     expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ action: SystemAuditAction.VOUCHER_CONFIRM }));
   });
+
+  it('voids all draft vouchers and moves the report back to paid', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'report_1', reportNo: 'EXP202606220001', status: ExpenseReportStatus.VOUCHER_DRAFTED }),
+        update: vi.fn().mockResolvedValue({ id: 'report_1', status: ExpenseReportStatus.PAID }),
+      },
+      glVoucher: {
+        count: vi.fn().mockResolvedValue(0),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'voucher_1',
+            voucherNo: 'VCH202606220001',
+            voucherType: GlVoucherType.PAYMENT,
+            status: GlVoucherStatus.DRAFT,
+            reportId: 'report_1',
+            paymentId: 'payment_1',
+            currency: 'CNY',
+            totalDebitCents: 10000,
+            totalCreditCents: 10000,
+            summary: 'Payment',
+            lines: [],
+            logs: [],
+          },
+        ]),
+        update: vi.fn().mockResolvedValue({ id: 'voucher_1', status: GlVoucherStatus.VOIDED, paymentId: null }),
+      },
+      expenseReportLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue(undefined) };
+    const service = new VouchersService(prisma as never, audit as never);
+
+    await expect(service.voidReportDrafts(accountant, 'report_1', 'mapping changed')).resolves.toEqual([expect.objectContaining({ status: GlVoucherStatus.VOIDED })]);
+    expect(tx.glVoucher.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: GlVoucherStatus.VOIDED,
+          paymentId: null,
+        }),
+      }),
+    );
+    expect(tx.expenseReportLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'VOUCHER_VOID',
+          fromStatus: ExpenseReportStatus.VOUCHER_DRAFTED,
+          toStatus: ExpenseReportStatus.PAID,
+        }),
+      }),
+    );
+    expect(tx.expenseReport.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: ExpenseReportStatus.PAID }) }));
+    expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ action: SystemAuditAction.VOUCHER_VOID }));
+  });
+
+  it('blocks voiding report drafts once any voucher is confirmed', async () => {
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'report_1', reportNo: 'EXP202606220001', status: ExpenseReportStatus.VOUCHER_DRAFTED }),
+      },
+      glVoucher: { count: vi.fn().mockResolvedValue(1) },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new VouchersService(prisma as never, {} as never);
+
+    await expect(service.voidReportDrafts(accountant, 'report_1')).rejects.toBeInstanceOf(BadRequestException);
+  });
 });

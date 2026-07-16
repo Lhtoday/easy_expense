@@ -75,3 +75,9 @@
 - 审计记录使用 `SystemAuditAction` 区分动作，保留操作者、操作者邮箱、对象类型、对象 id、before/after 结构化快照、metadata、备注和成功状态。
 - `GET /audit-logs` 提供后端审计查询入口，需要 `sys:audit:read` 权限。
 - 凭证相关动作已在 `SystemAuditAction` 中预留 `VOUCHER_DRAFT_GENERATE`、`VOUCHER_REGENERATE`、`VOUCHER_CONFIRM` 和 `VOUCHER_VOID`，Phase 9 实现时必须把凭证生成依据和借贷明细快照写入审计或凭证领域日志。
+
+## Phase 9 收尾说明
+
+- 未确认的凭证草稿支持通过 `POST /vouchers/reports/:reportId/void-drafts` 整单撤销，权限沿用 `gl:voucher:confirm`，报销单从 `VOUCHER_DRAFTED` 回到 `PAID`。
+- 草稿撤销会将对应 `gl_vouchers` 更新为 `VOIDED`，写入 `gl_voucher_logs`、`exp_report_logs` 和 `sys_audit_logs`；付款凭证顶层 `paymentId` 会清空以释放唯一约束，原始付款来源仍保留在凭证明细和审计快照中。
+- 已存在任一 `CONFIRMED` 凭证时不允许撤销草稿。确认后回退、冲销或作废不在本收尾范围内，需要作为独立财务控制流程设计。

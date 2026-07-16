@@ -337,8 +337,8 @@ export class BudgetsService {
         checks.push({
           reportId,
           itemId: item.id,
-          result: BudgetCheckResult.WARNING,
-          message: `${period} 未配置匹配预算，系统记录提醒但不阻断提交`,
+          result: BudgetCheckResult.BLOCK,
+          message: `${period} 未配置匹配预算，不能提交或继续流转。请先配置覆盖该部门、成本中心、项目、费用类型或会计科目的有效预算。`,
         });
         continue;
       }
@@ -456,6 +456,52 @@ export class BudgetsService {
         where: { id: occupation.id },
         data: { status: BudgetOccupationStatus.APPROVED, approvedCents: occupation.occupiedCents },
       });
+    }
+  }
+
+  async ensurePaymentBudgetReady(tx: Prisma.TransactionClient, reportId: string) {
+    const report = await tx.expenseReport.findFirst({
+      where: { id: reportId, deletedAt: null },
+      select: {
+        id: true,
+        items: {
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, description: true, reimbursableCents: true },
+        },
+      },
+    });
+    if (!report) {
+      throw new NotFoundException('报销单不存在');
+    }
+
+    const budgetChecks = await tx.expenseBudgetCheck.findMany({
+      where: {
+        reportId,
+        OR: [{ result: BudgetCheckResult.BLOCK }, { budgetId: null }],
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { itemId: true, result: true, budgetId: true, message: true },
+    });
+    if (budgetChecks.length) {
+      throw new BadRequestException(
+        budgetChecks
+          .map((check) => (check.budgetId ? check.message : `${check.message} 请先补齐匹配预算后再登记付款。`))
+          .join('；'),
+      );
+    }
+
+    const approvedOccupations = await tx.budgetOccupation.findMany({
+      where: { reportId, status: BudgetOccupationStatus.APPROVED },
+      select: { itemId: true, approvedCents: true },
+    });
+    const approvedItemIds = new Set(
+      approvedOccupations.filter((occupation) => occupation.approvedCents > 0).map((occupation) => occupation.itemId),
+    );
+    const missingItems = report.items.filter((item) => item.reimbursableCents > 0 && !approvedItemIds.has(item.id));
+    if (missingItems.length) {
+      throw new BadRequestException(
+        `报销单缺少已审批预算占用，不能登记付款：${missingItems.map((item) => item.description).join('、')}。请先补齐预算并重新走财务审核。`,
+      );
     }
   }
 

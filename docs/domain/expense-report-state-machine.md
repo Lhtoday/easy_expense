@@ -35,3 +35,9 @@
 - `FINANCE_APPROVED -> PAID`：需要出纳/付款权限。
 - `PAID -> VOUCHER_DRAFTED`：生成会计凭证草稿。
 - `VOUCHER_DRAFTED -> VOUCHER_CONFIRMED`：需要财务确认权限。
+
+## 2026-07-16 Phase 9 回退补充
+
+- `VOUCHER_DRAFTED -> PAID`：仅用于撤销尚未确认的凭证草稿。
+- 撤销必须写入凭证领域日志、报销单状态日志和系统审计日志。
+- 已确认凭证不得通过该路径回退，后续需单独设计冲销或确认后作废流程。

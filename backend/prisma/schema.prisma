@@ -68,6 +68,7 @@ enum ExpenseReportAction {
   PAYMENT_FAIL
   VOUCHER_DRAFT
   VOUCHER_CONFIRM
+  VOUCHER_VOID
   VOID
 }
 

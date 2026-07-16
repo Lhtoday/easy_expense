@@ -9,6 +9,7 @@ import {
   GenerateVoucherDto,
   UpdateAccountMappingDto,
   UpdateAccountSubjectDto,
+  VoidVoucherDraftsDto,
   VoucherReportListQueryDto,
 } from './voucher.dto';
 import { VouchersService } from './vouchers.service';
@@ -76,6 +77,11 @@ export class VouchersController {
   @Post('vouchers/reports/:reportId/generate')
   generateReport(@Req() request: RequestWithUser, @Param('reportId') reportId: string, @Body() dto: GenerateVoucherDto) {
     return this.service.generateReportVouchers(request.user, reportId, dto.comment);
+  }
+
+  @Post('vouchers/reports/:reportId/void-drafts')
+  voidReportDrafts(@Req() request: RequestWithUser, @Param('reportId') reportId: string, @Body() dto: VoidVoucherDraftsDto) {
+    return this.service.voidReportDrafts(request.user, reportId, dto.comment);
   }
 
   @Get('vouchers/:id')

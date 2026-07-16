@@ -67,6 +67,7 @@ export class PaymentsService {
       if (dto.amountCents !== remainingCents) {
         throw new BadRequestException('Payment amount must equal the remaining payable amount in Phase 8 MVP.');
       }
+      await this.budgets.ensurePaymentBudgetReady(tx, reportId);
 
       const batch = await tx.expensePaymentBatch.create({
         data: {

@@ -66,7 +66,10 @@ describe('PaymentsService', () => {
       expenseReportLog: { create: vi.fn().mockResolvedValue({ id: 'log_1' }) },
     };
     const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
-    const budgets = { transferActual: vi.fn().mockResolvedValue(undefined) };
+    const budgets = {
+      ensurePaymentBudgetReady: vi.fn().mockResolvedValue(undefined),
+      transferActual: vi.fn().mockResolvedValue(undefined),
+    };
     const service = new PaymentsService(prisma as never, budgets as never);
 
     await expect(
@@ -96,7 +99,48 @@ describe('PaymentsService', () => {
         }),
       }),
     );
+    expect(budgets.ensurePaymentBudgetReady).toHaveBeenCalledWith(tx, 'report_1');
     expect(budgets.transferActual).toHaveBeenCalledWith(tx, 'report_1', cashier.id, 10000);
+  });
+
+  it('blocks payment registration when approved budget occupation is missing', async () => {
+    const report = {
+      id: 'report_1',
+      reportNo: 'EXP001',
+      title: 'Taxi',
+      status: ExpenseReportStatus.FINANCE_APPROVED,
+      currency: 'CNY',
+      amountCents: 10000,
+      taxAmountCents: 600,
+      deductibleTaxCents: 600,
+      reimbursableCents: 10000,
+      paidAmountCents: 0,
+    };
+    const tx = {
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue(report),
+        update: vi.fn(),
+      },
+      expensePaymentBatch: {
+        count: vi.fn(),
+        create: vi.fn(),
+      },
+      expensePayment: { create: vi.fn() },
+      expenseReportLog: { create: vi.fn() },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const budgets = {
+      ensurePaymentBudgetReady: vi.fn().mockRejectedValue(new BadRequestException('报销单缺少已审批预算占用，不能登记付款。')),
+      transferActual: vi.fn(),
+    };
+    const service = new PaymentsService(prisma as never, budgets as never);
+
+    await expect(service.register(cashier, 'report_1', { amountCents: 10000 })).rejects.toBeInstanceOf(BadRequestException);
+    expect(budgets.ensurePaymentBudgetReady).toHaveBeenCalledWith(tx, 'report_1');
+    expect(tx.expensePaymentBatch.create).not.toHaveBeenCalled();
+    expect(tx.expensePayment.create).not.toHaveBeenCalled();
+    expect(tx.expenseReportLog.create).not.toHaveBeenCalled();
+    expect(budgets.transferActual).not.toHaveBeenCalled();
   });
 
   it('records failed payment without changing report status or budget actual amount', async () => {

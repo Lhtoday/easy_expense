@@ -267,7 +267,7 @@ export class VouchersService {
         deletedAt: null,
         status: { in: [ExpenseReportStatus.PAID, ExpenseReportStatus.VOUCHER_DRAFTED, ExpenseReportStatus.VOUCHER_CONFIRMED] },
       },
-      select: this.voucherReportSelect(),
+      select: this.voucherReportDetailSelect(),
     });
     if (!report) {
       throw new NotFoundException('Voucher report does not exist.');
@@ -429,6 +429,83 @@ export class VouchersService {
     });
   }
 
+  voidReportDrafts(user: AuthenticatedUser, reportId: string, comment?: string) {
+    this.ensurePermission(user, 'gl:voucher:confirm');
+    return this.prisma.$transaction(async (tx) => {
+      const report = await tx.expenseReport.findFirst({
+        where: { id: reportId, deletedAt: null },
+        select: { id: true, reportNo: true, status: true },
+      });
+      if (!report) {
+        throw new NotFoundException('报销单不存在');
+      }
+      if (report.status !== ExpenseReportStatus.VOUCHER_DRAFTED) {
+        throw new BadRequestException('只有凭证草稿状态的报销单可以撤销草稿。');
+      }
+
+      const confirmedCount = await tx.glVoucher.count({ where: { reportId, status: GlVoucherStatus.CONFIRMED } });
+      if (confirmedCount > 0) {
+        throw new BadRequestException('该报销单已有确认凭证，不能撤销草稿；后续需走冲销或作废流程。');
+      }
+
+      const before = await tx.glVoucher.findMany({
+        where: { reportId, status: GlVoucherStatus.DRAFT },
+        orderBy: { generatedAt: 'asc' },
+        select: this.voucherSelect(),
+      });
+      if (!before.length) {
+        throw new BadRequestException('该报销单没有可撤销的凭证草稿。');
+      }
+
+      const vouchers = [];
+      for (const voucher of before) {
+        const updated = await tx.glVoucher.update({
+          where: { id: voucher.id },
+          data: {
+            status: GlVoucherStatus.VOIDED,
+            paymentId: null,
+            comment,
+            logs: {
+              create: {
+                operatorId: user.id,
+                action: GlVoucherAction.VOID,
+                fromStatus: GlVoucherStatus.DRAFT,
+                toStatus: GlVoucherStatus.VOIDED,
+                comment,
+                metadata: { originalPaymentId: voucher.paymentId } as Prisma.InputJsonValue,
+              },
+            },
+          },
+          select: this.voucherSelect(),
+        });
+        vouchers.push(updated);
+      }
+
+      await tx.expenseReportLog.create({
+        data: {
+          reportId,
+          operatorId: user.id,
+          action: ExpenseReportAction.VOUCHER_VOID,
+          fromStatus: ExpenseReportStatus.VOUCHER_DRAFTED,
+          toStatus: ExpenseReportStatus.PAID,
+          comment: comment ?? '撤销凭证草稿',
+        },
+      });
+      await tx.expenseReport.update({ where: { id: reportId }, data: { status: ExpenseReportStatus.PAID, updatedById: user.id } });
+      await this.audit.recordWithClient(tx, {
+        operator: user,
+        action: SystemAuditAction.VOUCHER_VOID,
+        entityType: 'gl-voucher',
+        entityId: reportId,
+        before,
+        after: vouchers,
+        metadata: { reportId, reportNo: report.reportNo, voucherCount: vouchers.length, fromStatus: report.status, toStatus: ExpenseReportStatus.PAID },
+        comment,
+      });
+      return vouchers;
+    });
+  }
+
   private async loadVoucherReport(client: PrismaService | Prisma.TransactionClient, reportId: string) {
     const report = await client.expenseReport.findFirst({
       where: { id: reportId, deletedAt: null },
@@ -513,6 +590,119 @@ export class VouchersService {
         where: { status: { not: GlVoucherStatus.VOIDED } },
         orderBy: { generatedAt: 'asc' },
         select: this.voucherSelect(),
+      },
+    } satisfies Prisma.ExpenseReportSelect;
+  }
+
+  private voucherReportDetailSelect() {
+    return {
+      ...this.voucherReportSelect(),
+      departmentId: true,
+      costCenterId: true,
+      projectId: true,
+      items: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          occurredAt: true,
+          expenseTypeCode: true,
+          accountSubjectCode: true,
+          description: true,
+          departmentId: true,
+          costCenterId: true,
+          projectId: true,
+          amountCents: true,
+          taxAmountCents: true,
+          deductibleTaxCents: true,
+          reimbursableCents: true,
+        },
+      },
+      logs: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          action: true,
+          fromStatus: true,
+          toStatus: true,
+          comment: true,
+          createdAt: true,
+          operator: { select: { id: true, name: true } },
+        },
+      },
+      attachments: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          fileName: true,
+          mimeType: true,
+          sizeBytes: true,
+          storageBucket: true,
+          storageKey: true,
+          category: true,
+          createdAt: true,
+          uploadedBy: { select: { id: true, name: true } },
+        },
+      },
+      invoices: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          itemId: true,
+          invoiceCode: true,
+          invoiceNo: true,
+          issuedAt: true,
+          amountCents: true,
+          taxAmountCents: true,
+          totalAmountCents: true,
+          currency: true,
+          sellerName: true,
+          sellerTaxNo: true,
+          buyerName: true,
+          buyerTaxNo: true,
+          duplicateStatus: true,
+          duplicateOfId: true,
+          createdAt: true,
+          createdBy: { select: { id: true, name: true } },
+        },
+      },
+      policyChecks: {
+        orderBy: [{ result: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          itemId: true,
+          result: true,
+          message: true,
+          createdAt: true,
+          policy: { select: { id: true, code: true, name: true } },
+          rule: { select: { id: true, code: true, name: true, action: true } },
+        },
+      },
+      budgetChecks: {
+        orderBy: [{ result: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          itemId: true,
+          result: true,
+          message: true,
+          createdAt: true,
+          budget: { select: { id: true, code: true, name: true } },
+        },
+      },
+      budgetOccupations: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          itemId: true,
+          status: true,
+          fiscalPeriod: true,
+          occupiedCents: true,
+          approvedCents: true,
+          actualCents: true,
+          releasedCents: true,
+          budget: { select: { id: true, code: true, name: true } },
+        },
       },
     } satisfies Prisma.ExpenseReportSelect;
   }

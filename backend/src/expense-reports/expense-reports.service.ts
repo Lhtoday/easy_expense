@@ -7,6 +7,7 @@ import {
   ExpenseAttachmentCategory,
   ExpenseReportAction,
   ExpenseReportStatus,
+  GlVoucherStatus,
   InvoiceDuplicateStatus,
   Prisma,
   SystemAuditAction,
@@ -881,7 +882,59 @@ export class ExpenseReportsService {
           operator: { select: { id: true, name: true } },
         },
       },
+      vouchers: {
+        where: { status: { not: GlVoucherStatus.VOIDED } },
+        orderBy: { generatedAt: 'asc' },
+        select: this.voucherSelect(),
+      },
     } satisfies Prisma.ExpenseReportSelect;
+  }
+
+  private voucherSelect() {
+    return {
+      id: true,
+      voucherNo: true,
+      voucherType: true,
+      status: true,
+      reportId: true,
+      paymentId: true,
+      currency: true,
+      totalDebitCents: true,
+      totalCreditCents: true,
+      summary: true,
+      generatedAt: true,
+      confirmedAt: true,
+      comment: true,
+      generatedBy: { select: { id: true, name: true } },
+      confirmedBy: { select: { id: true, name: true } },
+      lines: {
+        orderBy: { lineNo: 'asc' },
+        select: {
+          id: true,
+          lineNo: true,
+          direction: true,
+          accountSubjectCode: true,
+          amountCents: true,
+          currency: true,
+          summary: true,
+          itemId: true,
+          paymentId: true,
+          accountSubject: { select: { code: true, name: true, category: true } },
+        },
+      },
+      logs: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          action: true,
+          fromStatus: true,
+          toStatus: true,
+          comment: true,
+          createdAt: true,
+          operator: { select: { id: true, name: true } },
+        },
+      },
+    } satisfies Prisma.GlVoucherSelect;
   }
 
   private attachmentSelect() {

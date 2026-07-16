@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { BudgetControlMode, BudgetOccupationStatus, ExpenseReportStatus } from '@prisma/client';
+import { BudgetCheckResult, BudgetControlMode, BudgetOccupationStatus, ExpenseReportStatus } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { BudgetsService } from './budgets.service';
@@ -217,5 +217,49 @@ describe('BudgetsService paid report reconciliation', () => {
       skipped: [{ itemId: 'item_1', reason: 'Item already has actual budget occupation.' }],
     });
     expect(tx.budgetOccupation.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks report submission when no matching budget is configured', async () => {
+    const tx = {
+      budgetOccupation: { findMany: vi.fn().mockResolvedValue([]) },
+      expenseBudgetCheck: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      expenseReport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'report_1',
+          currency: 'CNY',
+          items: [
+            {
+              id: 'item_1',
+              occurredAt: new Date('2026-06-08T00:00:00.000Z'),
+              departmentId: 'dep_1',
+              costCenterId: 'cc_1',
+              projectId: null,
+              expenseTypeCode: 'TRAVEL',
+              accountSubjectCode: '660201',
+              reimbursableCents: 10000,
+            },
+          ],
+        }),
+      },
+      budget: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const service = new BudgetsService({} as never);
+
+    await expect(service.occupyOnSubmit(tx as never, 'report_1', budgetUser.id)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.expenseBudgetCheck.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            reportId: 'report_1',
+            itemId: 'item_1',
+            result: BudgetCheckResult.BLOCK,
+            message: expect.stringContaining('未配置匹配预算'),
+          }),
+        ],
+      }),
+    );
   });
 });

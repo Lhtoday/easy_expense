@@ -369,13 +369,6 @@ body {
   width: 100%;
 }
 
-.approval-expanded {
-  display: grid;
-  gap: 12px;
-  padding: 10px;
-  background: #f8fafc;
-}
-
 .policy-grid {
   display: grid;
   grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.4fr);
