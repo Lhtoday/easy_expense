@@ -255,3 +255,4 @@
 - 已确认凭证暂不允许回退，后续需单独设计冲销或作废流程。
 - 预算缺失控制已收紧：未配置匹配预算由提醒改为提交阻断，财务审核和付款登记也会阻断缺少有效预算占用的历史单据继续流转。
 - 本地演示库已按用户要求清空报销、审批、财务审核、付款、凭证、预算占用和预算检查等流程交易数据；用户、组织、预算主数据、会计科目和科目映射保留，预算占用/已批/实际发生金额已归零。
+- 进度已提交并推送：`cc494cf` 已于 2026-07-16 推送到 `origin/main`，分支 `main`。验证通过：`npm.cmd run test --workspace backend`、`npm.cmd run lint --workspace backend`、`npm.cmd run build --workspace backend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace frontend`；前端构建仍有既有大 chunk 提示。
