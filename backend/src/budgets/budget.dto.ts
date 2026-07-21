@@ -2,6 +2,9 @@ import { BudgetControlMode, BudgetStatus } from '@prisma/client';
 import { IsEnum, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
+export const MAX_INT_CENTS = 2_147_483_647;
+export const MAX_INT_YUAN_LABEL = '21474836.47';
+
 export class BudgetListQueryDto {
   @IsOptional()
   @Type(() => Number)
@@ -40,22 +43,27 @@ export class CreateBudgetDto {
   fiscalPeriod!: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsString()
   departmentId?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsString()
   costCenterId?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsString()
   projectId?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsString()
   expenseTypeCode?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsString()
   accountSubjectCode?: string;
 
@@ -66,6 +74,7 @@ export class CreateBudgetDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_INT_CENTS, { message: `预算总额不能超过 ${MAX_INT_YUAN_LABEL} 元` })
   totalCents!: number;
 
   @IsOptional()
@@ -114,6 +123,7 @@ export class UpdateBudgetDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_INT_CENTS, { message: `预算总额不能超过 ${MAX_INT_YUAN_LABEL} 元` })
   totalCents?: number;
 
   @IsOptional()

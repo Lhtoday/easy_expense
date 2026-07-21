@@ -109,18 +109,22 @@ export class ExpensePoliciesService {
     this.ensurePermission(user, 'exp:policy:write');
     const before = await this.ensureExpenseTypeById(id);
     return this.prisma.$transaction(async (tx) => {
-      const expenseType = await tx.expenseType.update({
-        where: { id },
-        data: { status: MasterDataStatus.DISABLED, deletedAt: new Date() },
-        select: this.expenseTypeSelect(),
-      });
+      const referenced = await this.expenseTypeHasReferences(tx, before.code);
+      const expenseType = referenced
+        ? await tx.expenseType.update({
+            where: { id },
+            data: { status: MasterDataStatus.DISABLED },
+            select: this.expenseTypeSelect(),
+          })
+        : await tx.expenseType.delete({ where: { id }, select: this.expenseTypeSelect() });
       await this.audit.recordWithClient(tx, {
         operator: user,
         action: SystemAuditAction.EXPENSE_TYPE_DISABLE,
         entityType: 'expense-type',
         entityId: id,
         before,
-        after: expenseType,
+        after: referenced ? expenseType : null,
+        metadata: { physicalDeleted: !referenced },
       });
       return expenseType;
     });
@@ -480,6 +484,17 @@ export class ExpensePoliciesService {
     if (!expenseType) {
       throw new BadRequestException('费用类型不存在或已停用');
     }
+  }
+
+  private async expenseTypeHasReferences(tx: Prisma.TransactionClient, code: string) {
+    const [reportItems, policyRules, budgets, budgetOccupations, accountMappings] = await Promise.all([
+      tx.expenseReportItem.count({ where: { expenseTypeCode: code } }),
+      tx.expensePolicyRule.count({ where: { expenseTypeCode: code } }),
+      tx.budget.count({ where: { expenseTypeCode: code } }),
+      tx.budgetOccupation.count({ where: { expenseTypeCode: code } }),
+      tx.glAccountMapping.count({ where: { expenseTypeCode: code, deletedAt: null } }),
+    ]);
+    return [reportItems, policyRules, budgets, budgetOccupations, accountMappings].some((count) => count > 0);
   }
 
   private ruleData(policyId: string, dto: CreateExpensePolicyRuleDto): Prisma.ExpensePolicyRuleUncheckedCreateInput {

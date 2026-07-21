@@ -6,6 +6,8 @@ import {
   BudgetOccupationStatus,
   BudgetStatus,
   ExpenseReportStatus,
+  GlStatus,
+  MasterDataStatus,
   Prisma,
   SystemAuditAction,
 } from '@prisma/client';
@@ -13,7 +15,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
-import { BudgetListQueryDto, CreateBudgetDto, UpdateBudgetDto } from './budget.dto';
+import { BudgetListQueryDto, CreateBudgetDto, MAX_INT_CENTS, MAX_INT_YUAN_LABEL, UpdateBudgetDto } from './budget.dto';
 
 type BudgetSnapshot = {
   id: string;
@@ -76,23 +78,12 @@ export class BudgetsService {
   create(user: AuthenticatedUser, dto: CreateBudgetDto) {
     this.ensurePermission(user, 'exp:budget:write');
     this.validateBudgetAmount(dto.totalCents);
+    this.validateBudgetAmountUpperBound(dto.totalCents);
     return this.prisma.$transaction(async (tx) => {
+      const data = this.budgetCreateData(dto, user.id);
+      await this.ensureBudgetDimensions(tx, data);
       const budget = await tx.budget.create({
-        data: {
-          code: dto.code.trim().toUpperCase(),
-          name: dto.name,
-          fiscalPeriod: dto.fiscalPeriod,
-          departmentId: dto.departmentId,
-          costCenterId: dto.costCenterId,
-          projectId: dto.projectId,
-          expenseTypeCode: dto.expenseTypeCode?.trim().toUpperCase(),
-          accountSubjectCode: dto.accountSubjectCode?.trim(),
-          currency: dto.currency ?? 'CNY',
-          totalCents: dto.totalCents,
-          warningThresholdBps: dto.warningThresholdBps ?? 9000,
-          controlMode: dto.controlMode ?? BudgetControlMode.WARNING,
-          createdById: user.id,
-        },
+        data,
         select: this.budgetSelect(),
       });
       await this.audit.recordWithClient(tx, {
@@ -106,6 +97,24 @@ export class BudgetsService {
     });
   }
 
+  private budgetCreateData(dto: CreateBudgetDto, createdById: string): Prisma.BudgetUncheckedCreateInput {
+    return {
+      code: dto.code.trim().toUpperCase(),
+      name: dto.name,
+      fiscalPeriod: dto.fiscalPeriod,
+      departmentId: this.optionalId(dto.departmentId),
+      costCenterId: this.optionalId(dto.costCenterId),
+      projectId: this.optionalId(dto.projectId),
+      expenseTypeCode: this.optionalCode(dto.expenseTypeCode),
+      accountSubjectCode: this.optionalId(dto.accountSubjectCode),
+      currency: this.optionalId(dto.currency) ?? 'CNY',
+      totalCents: dto.totalCents,
+      warningThresholdBps: dto.warningThresholdBps ?? 9000,
+      controlMode: dto.controlMode ?? BudgetControlMode.WARNING,
+      createdById,
+    };
+  }
+
   async update(user: AuthenticatedUser, id: string, dto: UpdateBudgetDto) {
     this.ensurePermission(user, 'exp:budget:write');
     const existing = await this.prisma.budget.findFirst({ where: { id, deletedAt: null }, select: this.budgetSelect() });
@@ -114,6 +123,7 @@ export class BudgetsService {
     }
     if (dto.totalCents !== undefined) {
       this.validateBudgetAmount(dto.totalCents);
+      this.validateBudgetAmountUpperBound(dto.totalCents);
     }
     return this.prisma.$transaction(async (tx) => {
       const budget = await tx.budget.update({
@@ -149,18 +159,22 @@ export class BudgetsService {
     this.ensurePermission(user, 'exp:budget:write');
     const before = await this.ensureBudget(id);
     return this.prisma.$transaction(async (tx) => {
-      const budget = await tx.budget.update({
-        where: { id },
-        data: { status: BudgetStatus.DISABLED, updatedById: user.id },
-        select: this.budgetSelect(),
-      });
+      const referenced = await this.budgetHasReferences(tx, id);
+      const budget = referenced
+        ? await tx.budget.update({
+            where: { id },
+            data: { status: BudgetStatus.DISABLED, updatedById: user.id },
+            select: this.budgetSelect(),
+          })
+        : await tx.budget.delete({ where: { id }, select: this.budgetSelect() });
       await this.audit.recordWithClient(tx, {
         operator: user,
         action: SystemAuditAction.BUDGET_DISABLE,
         entityType: 'budget',
         entityId: id,
         before: this.auditBudget(before),
-        after: this.auditBudget(budget),
+        after: referenced ? this.auditBudget(budget) : null,
+        metadata: { physicalDeleted: !referenced },
       });
       return budget;
     });
@@ -608,6 +622,72 @@ export class BudgetsService {
     }
   }
 
+  private validateBudgetAmountUpperBound(totalCents: number) {
+    if (totalCents > MAX_INT_CENTS) {
+      throw new BadRequestException(`预算总额不能超过 ${MAX_INT_YUAN_LABEL} 元。当前金额过大，请拆分预算或调低金额。`);
+    }
+  }
+
+  private async ensureBudgetDimensions(tx: Prisma.TransactionClient, data: Prisma.BudgetUncheckedCreateInput) {
+    const [duplicate, department, costCenter, project, expenseType, accountSubject] = await Promise.all([
+      tx.budget.findFirst({
+        where: {
+          fiscalPeriod: data.fiscalPeriod,
+          departmentId: data.departmentId ?? null,
+          costCenterId: data.costCenterId ?? null,
+          projectId: data.projectId ?? null,
+          expenseTypeCode: data.expenseTypeCode ?? null,
+          accountSubjectCode: data.accountSubjectCode ?? null,
+          currency: data.currency,
+          deletedAt: null,
+        },
+        select: { id: true, code: true },
+      }),
+      data.departmentId
+        ? tx.department.findFirst({ where: { id: data.departmentId, deletedAt: null, status: MasterDataStatus.ACTIVE }, select: { id: true } })
+        : Promise.resolve(null),
+      data.costCenterId
+        ? tx.costCenter.findFirst({ where: { id: data.costCenterId, deletedAt: null, status: MasterDataStatus.ACTIVE }, select: { id: true } })
+        : Promise.resolve(null),
+      data.projectId
+        ? tx.project.findFirst({ where: { id: data.projectId, deletedAt: null, status: MasterDataStatus.ACTIVE }, select: { id: true } })
+        : Promise.resolve(null),
+      data.expenseTypeCode
+        ? tx.expenseType.findFirst({ where: { code: data.expenseTypeCode, deletedAt: null, status: MasterDataStatus.ACTIVE }, select: { id: true } })
+        : Promise.resolve(null),
+      data.accountSubjectCode
+        ? tx.glAccountSubject.findFirst({ where: { code: data.accountSubjectCode, deletedAt: null, status: GlStatus.ACTIVE }, select: { id: true } })
+        : Promise.resolve(null),
+    ]);
+
+    if (duplicate) {
+      throw new BadRequestException(`该期间和维度组合已有预算 ${duplicate.code}，请调整维度或编辑已有预算。`);
+    }
+    if (data.departmentId && !department) {
+      throw new BadRequestException('部门不存在或已停用，请通过选择器选择有效部门。');
+    }
+    if (data.costCenterId && !costCenter) {
+      throw new BadRequestException('成本中心不存在或已停用，请通过选择器选择有效成本中心。');
+    }
+    if (data.projectId && !project) {
+      throw new BadRequestException('项目不存在或已停用，请通过选择器选择有效项目。');
+    }
+    if (data.expenseTypeCode && !expenseType) {
+      throw new BadRequestException('费用类型不存在或已停用，请选择有效费用类型。');
+    }
+    if (data.accountSubjectCode && !accountSubject) {
+      throw new BadRequestException('会计科目不存在或已停用，请填写有效会计科目编码。');
+    }
+  }
+
+  private optionalId(value?: string | null) {
+    return value?.trim() || undefined;
+  }
+
+  private optionalCode(value?: string | null) {
+    return value?.trim().toUpperCase() || undefined;
+  }
+
   private periodOf(date: Date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   }
@@ -631,6 +711,15 @@ export class BudgetsService {
       throw new NotFoundException('预算不存在');
     }
     return budget;
+  }
+
+  private async budgetHasReferences(tx: Prisma.TransactionClient, id: string) {
+    const [occupations, checks, logs] = await Promise.all([
+      tx.budgetOccupation.count({ where: { budgetId: id } }),
+      tx.expenseBudgetCheck.count({ where: { budgetId: id } }),
+      tx.budgetOperationLog.count({ where: { budgetId: id } }),
+    ]);
+    return [occupations, checks, logs].some((count) => count > 0);
   }
 
   private auditBudget(budget: {

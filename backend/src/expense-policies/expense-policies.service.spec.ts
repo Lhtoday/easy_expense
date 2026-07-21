@@ -1,4 +1,4 @@
-import { ExpensePolicyAction, ExpensePolicyCheckResult, ExpensePolicyStatus } from '@prisma/client';
+import { ExpensePolicyAction, ExpensePolicyCheckResult, ExpensePolicyStatus, MasterDataStatus } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthenticatedUser } from '../identity/identity.types';
 import { ExpensePoliciesService } from './expense-policies.service';
@@ -15,6 +15,73 @@ const policyUser: AuthenticatedUser = {
 };
 
 describe('ExpensePoliciesService', () => {
+  it('physically deletes unreferenced expense types and audits the cleanup', async () => {
+    const expenseType = {
+      id: 'type_1',
+      code: 'TEMP',
+      name: 'Temporary',
+      description: null,
+      status: MasterDataStatus.ACTIVE,
+      defaultAccountSubjectCode: null,
+      createdAt: new Date('2026-07-17T00:00:00.000Z'),
+      deletedAt: null,
+    };
+    const tx = {
+      expenseType: {
+        delete: vi.fn().mockResolvedValue(expenseType),
+      },
+      expenseReportItem: { count: vi.fn().mockResolvedValue(0) },
+      expensePolicyRule: { count: vi.fn().mockResolvedValue(0) },
+      budget: { count: vi.fn().mockResolvedValue(0) },
+      budgetOccupation: { count: vi.fn().mockResolvedValue(0) },
+      glAccountMapping: { count: vi.fn().mockResolvedValue(0) },
+    };
+    const prisma = {
+      expenseType: { findFirst: vi.fn().mockResolvedValue(expenseType) },
+      $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
+    };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue({ id: 'audit_1' }) };
+    const service = new ExpensePoliciesService(prisma as never, audit as never);
+
+    await expect(service.disableExpenseType(policyUser, 'type_1')).resolves.toEqual(expenseType);
+    expect(tx.expenseType.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'type_1' } }));
+    expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ metadata: { physicalDeleted: true }, after: null }));
+  });
+
+  it('disables referenced expense types instead of deleting them', async () => {
+    const before = {
+      id: 'type_1',
+      code: 'TRAVEL',
+      name: 'Travel',
+      description: null,
+      status: MasterDataStatus.ACTIVE,
+      defaultAccountSubjectCode: null,
+      createdAt: new Date('2026-07-17T00:00:00.000Z'),
+      deletedAt: null,
+    };
+    const after = { ...before, status: MasterDataStatus.DISABLED };
+    const tx = {
+      expenseType: {
+        update: vi.fn().mockResolvedValue(after),
+      },
+      expenseReportItem: { count: vi.fn().mockResolvedValue(1) },
+      expensePolicyRule: { count: vi.fn().mockResolvedValue(0) },
+      budget: { count: vi.fn().mockResolvedValue(0) },
+      budgetOccupation: { count: vi.fn().mockResolvedValue(0) },
+      glAccountMapping: { count: vi.fn().mockResolvedValue(0) },
+    };
+    const prisma = {
+      expenseType: { findFirst: vi.fn().mockResolvedValue(before) },
+      $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
+    };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue({ id: 'audit_1' }) };
+    const service = new ExpensePoliciesService(prisma as never, audit as never);
+
+    await expect(service.disableExpenseType(policyUser, 'type_1')).resolves.toEqual(after);
+    expect(tx.expenseType.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: MasterDataStatus.DISABLED } }));
+    expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ metadata: { physicalDeleted: false }, after }));
+  });
+
   it('records expense policy rule creation audit', async () => {
     const rule = {
       id: 'rule_1',

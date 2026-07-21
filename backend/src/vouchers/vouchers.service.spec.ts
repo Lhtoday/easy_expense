@@ -6,6 +6,9 @@ import {
   GlVoucherStatus,
   GlVoucherType,
   PaymentMethod,
+  GlAccountCategory,
+  GlNormalBalance,
+  GlStatus,
   SystemAuditAction,
 } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
@@ -80,6 +83,80 @@ function mappingFor(purpose: GlAccountMappingPurpose) {
 }
 
 describe('VouchersService', () => {
+  it('physically deletes unreferenced account subjects and audits the cleanup', async () => {
+    const subject = {
+      id: 'subject_1',
+      code: '660199',
+      name: 'Temporary expense',
+      category: GlAccountCategory.EXPENSE,
+      normalBalance: GlNormalBalance.DEBIT,
+      description: null,
+      status: GlStatus.ACTIVE,
+      createdAt: new Date('2026-07-17T00:00:00.000Z'),
+      deletedAt: null,
+      createdBy: { id: accountant.id, name: accountant.name },
+      updatedBy: null,
+    };
+    const tx = {
+      glAccountSubject: { delete: vi.fn().mockResolvedValue(subject) },
+      expenseType: { count: vi.fn().mockResolvedValue(0) },
+      expenseReportItem: { count: vi.fn().mockResolvedValue(0) },
+      budget: { count: vi.fn().mockResolvedValue(0) },
+      budgetOccupation: { count: vi.fn().mockResolvedValue(0) },
+      glAccountMapping: { count: vi.fn().mockResolvedValue(0) },
+      glVoucherLine: { count: vi.fn().mockResolvedValue(0) },
+    };
+    const prisma = {
+      glAccountSubject: { findFirst: vi.fn().mockResolvedValue(subject) },
+      $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
+    };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue(undefined) };
+    const service = new VouchersService(prisma as never, audit as never);
+
+    await expect(service.disableSubject(accountant, 'subject_1')).resolves.toEqual(subject);
+    expect(tx.glAccountSubject.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'subject_1' } }));
+    expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ metadata: { physicalDeleted: true }, after: null }));
+  });
+
+  it('deletes account mappings because generated vouchers keep independent line snapshots', async () => {
+    const mapping = {
+      id: 'mapping_1',
+      purpose: GlAccountMappingPurpose.EXPENSE_TYPE,
+      expenseTypeCode: 'TRAVEL',
+      applicantId: null,
+      paymentMethod: null,
+      payerAccount: null,
+      departmentId: null,
+      costCenterId: null,
+      projectId: null,
+      accountSubjectCode: '660101',
+      priority: 100,
+      status: GlStatus.ACTIVE,
+      effectiveFrom: null,
+      effectiveTo: null,
+      createdAt: new Date('2026-07-17T00:00:00.000Z'),
+      deletedAt: null,
+      accountSubject: { id: 'subject_1', code: '660101', name: 'Travel' },
+      applicant: null,
+      department: null,
+      costCenter: null,
+      project: null,
+      createdBy: { id: accountant.id, name: accountant.name },
+      updatedBy: null,
+    };
+    const tx = { glAccountMapping: { delete: vi.fn().mockResolvedValue(mapping) } };
+    const prisma = {
+      glAccountMapping: { findFirst: vi.fn().mockResolvedValue(mapping) },
+      $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
+    };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue(undefined) };
+    const service = new VouchersService(prisma as never, audit as never);
+
+    await expect(service.disableMapping(accountant, 'mapping_1')).resolves.toEqual(mapping);
+    expect(tx.glAccountMapping.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'mapping_1' } }));
+    expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ metadata: { physicalDeleted: true }, after: null }));
+  });
+
   it('blocks voucher generation without permission', () => {
     const service = new VouchersService({} as never, {} as never);
 

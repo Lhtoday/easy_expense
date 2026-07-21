@@ -40,7 +40,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import type { FormInstance } from 'antd';
+import type { FormInstance, FormItemProps } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import axios from 'axios';
 import dayjs, { Dayjs } from 'dayjs';
@@ -586,6 +586,8 @@ interface ReferenceData {
 }
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api' });
+const MAX_INT_CENTS = 2_147_483_647;
+const MAX_INT_YUAN_LABEL = '21474836.47';
 
 const resources: Array<{
   key: ResourceKey;
@@ -1053,9 +1055,9 @@ export function App() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: [activeResource] });
       await queryClient.invalidateQueries({ queryKey: ['reference', activeResource] });
-      messageApi.success('已停用');
+      messageApi.success(['departments', 'cost-centers', 'projects'].includes(activeResource) ? '已删除或停用' : '已停用');
     },
-    onError: () => messageApi.error('停用失败'),
+    onError: () => messageApi.error(['departments', 'cost-centers', 'projects'].includes(activeResource) ? '删除或停用失败' : '停用失败'),
   });
 
   const saveExpenseMutation = useMutation({
@@ -1073,7 +1075,7 @@ export function App() {
       await queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
       messageApi.success('草稿已保存');
     },
-    onError: () => messageApi.error('报销单保存失败，请检查明细金额和必填字段'),
+    onError: (error) => messageApi.error(apiErrorMessage(error, '报销单保存失败，请检查明细金额和必填字段')),
   });
 
   const submitExpenseMutation = useMutation({
@@ -1551,6 +1553,7 @@ export function App() {
               canWrite={canWrite}
               expenseTypes={expenseTypesQuery.data?.items ?? []}
               loading={budgetsQuery.isLoading}
+              referenceData={referenceData}
               onChanged={() => {
                 void queryClient.invalidateQueries({ queryKey: ['budgets'] });
                 void queryClient.invalidateQueries({ queryKey: ['expense-reports'] });
@@ -1712,9 +1715,9 @@ function AccountSettingsView({
     mutationFn: async (id: string) => api.delete(`/account-subjects/${id}`, { headers: authHeaders() }),
     onSuccess: () => {
       onChanged();
-      message.success('会计科目已停用');
+      message.success('会计科目已删除或停用');
     },
-    onError: (error) => message.error(apiErrorMessage(error, '会计科目停用失败')),
+    onError: (error) => message.error(apiErrorMessage(error, '会计科目删除或停用失败')),
   });
 
   const saveMappingMutation = useMutation({
@@ -1739,9 +1742,9 @@ function AccountSettingsView({
     mutationFn: async (id: string) => api.delete(`/account-mappings/${id}`, { headers: authHeaders() }),
     onSuccess: () => {
       onChanged();
-      message.success('科目映射已停用');
+      message.success('科目映射已删除');
     },
-    onError: (error) => message.error(apiErrorMessage(error, '科目映射停用失败')),
+    onError: (error) => message.error(apiErrorMessage(error, '科目映射删除失败')),
   });
 
   function openSubjectModal(subject?: AccountSubjectRecord) {
@@ -1932,9 +1935,9 @@ function ExpensePoliciesView({
     mutationFn: async (id: string) => api.delete(`/expense-types/${id}`, { headers: authHeaders() }),
     onSuccess: () => {
       onChanged();
-      message.success('费用类型已停用');
+      message.success('费用类型已删除或停用');
     },
-    onError: (error) => message.error(apiErrorMessage(error, '费用类型停用失败')),
+    onError: (error) => message.error(apiErrorMessage(error, '费用类型删除或停用失败')),
   });
 
   const savePolicyMutation = useMutation({
@@ -2027,7 +2030,7 @@ function ExpensePoliciesView({
                 width: 90,
                 render: (_: unknown, record: ExpenseTypeRecord) => (
                   <Button danger size="small" disabled={!canWrite || record.status === 'DISABLED'} onClick={() => disableExpenseTypeMutation.mutate(record.id)}>
-                    停用
+                    删除/停用
                   </Button>
                 ),
               },
@@ -2153,12 +2156,14 @@ function BudgetsView({
   canWrite,
   expenseTypes,
   loading,
+  referenceData,
   onChanged,
 }: {
   budgets: BudgetRecord[];
   canWrite: boolean;
   expenseTypes: ExpenseTypeRecord[];
   loading: boolean;
+  referenceData: ReferenceData;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -2182,9 +2187,9 @@ function BudgetsView({
     mutationFn: async (id: string) => api.delete(`/budgets/${id}`, { headers: authHeaders() }),
     onSuccess: () => {
       onChanged();
-      message.success('预算已停用');
+      message.success('预算已删除或停用');
     },
-    onError: (error) => message.error(apiErrorMessage(error, '预算停用失败')),
+    onError: (error) => message.error(apiErrorMessage(error, '预算删除或停用失败')),
   });
 
   const enableBudgetMutation = useMutation({
@@ -2228,21 +2233,21 @@ function BudgetsView({
           <Form.Item name="fiscalPeriod" label="预算期间" rules={[{ required: true }]}>
             <DatePicker picker="month" style={{ width: '100%' }} />
           </Form.Item>
-          <MoneyField name={['totalYuan']} label="预算总额" />
+          <MoneyField name={['totalYuan']} label="预算总额" maxCents={MAX_INT_CENTS} />
           <Form.Item name="expenseTypeCode" label="费用类型">
             <Select allowClear placeholder="留空表示全部费用类型" options={expenseTypeOptionsForBudget.length ? expenseTypeOptionsForBudget : expenseTypeOptions} />
           </Form.Item>
           <Form.Item name="accountSubjectCode" label="会计科目">
             <Input placeholder="留空表示全部会计科目" />
           </Form.Item>
-          <Form.Item name="departmentId" label="部门 ID">
-            <Input placeholder="留空表示全部部门" />
+          <Form.Item name="departmentId" label="部门">
+            <ReferenceSelect records={referenceData.departments} placeholder="留空表示全部部门" />
           </Form.Item>
-          <Form.Item name="costCenterId" label="成本中心 ID">
-            <Input placeholder="留空表示全部成本中心" />
+          <Form.Item name="costCenterId" label="成本中心">
+            <ReferenceSelect records={referenceData.costCenters} placeholder="留空表示全部成本中心" />
           </Form.Item>
-          <Form.Item name="projectId" label="项目 ID">
-            <Input placeholder="留空表示全部项目" />
+          <Form.Item name="projectId" label="项目">
+            <ReferenceSelect records={referenceData.projects} placeholder="留空表示全部项目" />
           </Form.Item>
           <Form.Item name="currency" label="币种">
             <Input />
@@ -2820,7 +2825,7 @@ function accountSubjectColumns(
             编辑
           </Button>
           <Button size="small" danger disabled={!canWrite || record.status === 'DISABLED'} onClick={() => onDisable(record.id)}>
-            停用
+            删除/停用
           </Button>
         </Space>
       ),
@@ -2859,7 +2864,7 @@ function accountMappingColumns(
             编辑
           </Button>
           <Button size="small" danger disabled={!canWrite || record.status === 'DISABLED'} onClick={() => onDisable(record.id)}>
-            停用
+            删除
           </Button>
         </Space>
       ),
@@ -3095,7 +3100,7 @@ function budgetColumns(canWrite: boolean, onDisable: (id: string) => void, onEna
       render: (_: unknown, record) => (
         record.status === 'ACTIVE' ? (
           <Button danger size="small" disabled={!canWrite} onClick={() => onDisable(record.id)}>
-            停用
+            删除/停用
           </Button>
         ) : (
           <Button size="small" disabled={!canWrite} onClick={() => onEnable(record.id)}>
@@ -3184,8 +3189,32 @@ function ExpenseReportForm({
                   </Form.Item>
                   <MoneyField name={[field.name, 'amountYuan']} label="费用金额" />
                   <MoneyField name={[field.name, 'taxAmountYuan']} label="税额" />
-                  <MoneyField name={[field.name, 'deductibleTaxYuan']} label="可抵扣税额" />
-                  <MoneyField name={[field.name, 'reimbursableYuan']} label="可报销金额" />
+                  <MoneyField
+                    name={[field.name, 'deductibleTaxYuan']}
+                    label="可抵扣税额"
+                    dependencies={[['items', field.name, 'taxAmountYuan']]}
+                    rules={[
+                      ({ getFieldValue }) => ({
+                        validator: (_rule: unknown, value?: string) =>
+                          yuanToCents(value) <= yuanToCents(getFieldValue(['items', field.name, 'taxAmountYuan']))
+                            ? Promise.resolve()
+                            : Promise.reject(new Error('可抵扣税额不能大于税额')),
+                      }),
+                    ]}
+                  />
+                  <MoneyField
+                    name={[field.name, 'reimbursableYuan']}
+                    label="可报销金额"
+                    dependencies={[['items', field.name, 'amountYuan']]}
+                    rules={[
+                      ({ getFieldValue }) => ({
+                        validator: (_rule: unknown, value?: string) =>
+                          yuanToCents(value) <= yuanToCents(getFieldValue(['items', field.name, 'amountYuan']))
+                            ? Promise.resolve()
+                            : Promise.reject(new Error('可报销金额不能大于费用金额')),
+                      }),
+                    ]}
+                  />
                 </div>
                 <Form.Item className="expense-line-override-toggle" name={[field.name, 'overrideDimensions']} valuePropName="checked">
                   <Checkbox>覆盖单据维度</Checkbox>
@@ -4238,14 +4267,38 @@ function VoucherStatusTag({ status }: { status: VoucherStatus }) {
   return <Tag color={config.color}>{config.label}</Tag>;
 }
 
-function MoneyField({ name, label }: { name: Array<string | number>; label: string }) {
+function MoneyField({
+  name,
+  label,
+  maxCents,
+  dependencies,
+  rules = [],
+}: {
+  name: Array<string | number>;
+  label: string;
+  maxCents?: number;
+  dependencies?: FormItemProps['dependencies'];
+  rules?: FormItemProps['rules'];
+}) {
   return (
     <Form.Item
       name={name}
       label={label}
+      dependencies={dependencies}
       rules={[
         { required: true },
         { pattern: /^\d+(\.\d{1,2})?$/, message: '请输入最多两位小数的金额' },
+        ...(maxCents
+          ? [
+              {
+                validator: (_rule: unknown, value?: string) =>
+                  yuanToCents(value) <= maxCents
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(`金额不能超过 ${MAX_INT_YUAN_LABEL} 元`)),
+              },
+            ]
+          : []),
+        ...(rules ?? []),
       ]}
     >
       <Input suffix="元" inputMode="decimal" />
@@ -4615,6 +4668,7 @@ function columns(
       { title: '状态', dataIndex: 'status', width: 100, render: () => <Tag color="green">启用</Tag> },
     ];
   }
+  const removeLabel = ['departments', 'cost-centers', 'projects'].includes(resource) ? '删除/停用' : '停用';
 
   return [
     { title: resource === 'users' ? '工号' : '编码', dataIndex: resource === 'users' ? 'employeeNo' : 'code', width: 140 },
@@ -4657,7 +4711,7 @@ function columns(
             编辑
           </Button>
           <Button size="small" danger disabled={!canWrite} onClick={() => onRemove(record)}>
-            停用
+            {removeLabel}
           </Button>
         </Space>
       ),

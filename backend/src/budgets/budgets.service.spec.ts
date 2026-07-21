@@ -16,6 +16,51 @@ const budgetUser: AuthenticatedUser = {
 };
 
 describe('BudgetsService paid report reconciliation', () => {
+  it('physically deletes unreferenced budgets and audits the cleanup', async () => {
+    const budget = {
+      id: 'budget_1',
+      code: 'TEMP',
+      name: 'Temporary budget',
+      fiscalPeriod: '2026-07',
+      departmentId: null,
+      costCenterId: null,
+      projectId: null,
+      expenseTypeCode: null,
+      accountSubjectCode: null,
+      currency: 'CNY',
+      totalCents: 10000,
+      inTransitCents: 0,
+      approvedCents: 0,
+      actualCents: 0,
+      warningThresholdBps: 9000,
+      controlMode: BudgetControlMode.WARNING,
+      status: 'ACTIVE',
+      createdAt: new Date('2026-07-17T00:00:00.000Z'),
+      department: null,
+      costCenter: null,
+      project: null,
+      createdBy: { id: budgetUser.id, name: budgetUser.name },
+      updatedBy: null,
+      logs: [],
+    };
+    const tx = {
+      budget: { delete: vi.fn().mockResolvedValue(budget) },
+      budgetOccupation: { count: vi.fn().mockResolvedValue(0) },
+      expenseBudgetCheck: { count: vi.fn().mockResolvedValue(0) },
+      budgetOperationLog: { count: vi.fn().mockResolvedValue(0) },
+    };
+    const prisma = {
+      budget: { findFirst: vi.fn().mockResolvedValue(budget) },
+      $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
+    };
+    const audit = { recordWithClient: vi.fn().mockResolvedValue({ id: 'audit_1' }) };
+    const service = new BudgetsService(prisma as never, audit as never);
+
+    await expect(service.disable(budgetUser, 'budget_1')).resolves.toEqual(budget);
+    expect(tx.budget.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'budget_1' } }));
+    expect(audit.recordWithClient).toHaveBeenCalledWith(tx, expect.objectContaining({ metadata: { physicalDeleted: true }, after: null }));
+  });
+
   it('records budget master-data creation audit', async () => {
     const budget = {
       id: 'budget_1',
@@ -43,7 +88,14 @@ describe('BudgetsService paid report reconciliation', () => {
       updatedBy: null,
       logs: [],
     };
-    const tx = { budget: { create: vi.fn().mockResolvedValue(budget) } };
+    const tx = {
+      budget: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue(budget) },
+      department: { findFirst: vi.fn() },
+      costCenter: { findFirst: vi.fn() },
+      project: { findFirst: vi.fn() },
+      expenseType: { findFirst: vi.fn().mockResolvedValue({ id: 'type_1' }) },
+      glAccountSubject: { findFirst: vi.fn().mockResolvedValue({ id: 'subject_1' }) },
+    };
     const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
     const audit = { recordWithClient: vi.fn().mockResolvedValue({ id: 'audit_1' }) };
     const service = new BudgetsService(prisma as never, audit as never);
@@ -68,6 +120,75 @@ describe('BudgetsService paid report reconciliation', () => {
         after: expect.objectContaining({ totalCents: 100000, expenseTypeCode: 'TRAVEL' }),
       }),
     );
+  });
+
+  it('returns a clear error when budget dimensions already exist', async () => {
+    const tx = {
+      budget: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'budget_existing', code: 'BUD202607' }),
+        create: vi.fn(),
+      },
+      department: { findFirst: vi.fn() },
+      costCenter: { findFirst: vi.fn() },
+      project: { findFirst: vi.fn() },
+      expenseType: { findFirst: vi.fn() },
+      glAccountSubject: { findFirst: vi.fn() },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new BudgetsService(prisma as never, {} as never);
+
+    await expect(
+      service.create(budgetUser, {
+        code: 'BUD202607',
+        name: 'July budget',
+        fiscalPeriod: '2026-07',
+        totalCents: 100000,
+      }),
+    ).rejects.toThrow('该期间和维度组合已有预算 BUD202607');
+    expect(tx.budget.create).not.toHaveBeenCalled();
+  });
+
+  it('returns a clear error when budget amount exceeds integer storage limit', async () => {
+    const prisma = { $transaction: vi.fn() };
+    const service = new BudgetsService(prisma as never, {} as never);
+
+    expect(() =>
+      service.create(budgetUser, {
+        code: 'BUDGET_TEST_PHONE',
+        name: 'BUDGET',
+        fiscalPeriod: '2026-06',
+        expenseTypeCode: 'PHONE',
+        totalCents: 10_000_000_000,
+      }),
+    ).toThrow('预算总额不能超过 21474836.47 元');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns a clear error when budget department is invalid', async () => {
+    const tx = {
+      budget: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      department: { findFirst: vi.fn().mockResolvedValue(null) },
+      costCenter: { findFirst: vi.fn() },
+      project: { findFirst: vi.fn() },
+      expenseType: { findFirst: vi.fn() },
+      glAccountSubject: { findFirst: vi.fn() },
+    };
+    const prisma = { $transaction: (callback: (client: typeof tx) => unknown) => callback(tx) };
+    const service = new BudgetsService(prisma as never, {} as never);
+
+    await expect(
+      service.create(budgetUser, {
+        code: 'BUD202607',
+        name: 'July budget',
+        fiscalPeriod: '2026-07',
+        departmentId: 'invalid_department',
+        totalCents: 100000,
+      }),
+    ).rejects.toThrow('部门不存在或已停用');
+    expect(tx.budget.create).not.toHaveBeenCalled();
   });
 
   it('only reconciles paid reports', async () => {

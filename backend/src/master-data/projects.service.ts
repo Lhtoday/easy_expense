@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { MasterDataStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PageResult } from '../shared/api-response';
 import { CreateProjectDto, UpdateProjectDto } from './master-data.dto';
@@ -37,7 +37,23 @@ export class ProjectsService {
 
   async remove(id: string) {
     await this.ensureExists(id);
-    return this.prisma.project.update({ where: { id }, data: { deletedAt: new Date() }, select: this.select() });
+    const referenced = await this.hasReferences(id);
+    if (!referenced) {
+      return this.prisma.project.delete({ where: { id }, select: this.select() });
+    }
+    return this.prisma.project.update({ where: { id }, data: { status: MasterDataStatus.DISABLED }, select: this.select() });
+  }
+
+  private async hasReferences(id: string) {
+    const [dataScopes, reports, reportItems, budgets, accountMappings, voucherLines] = await this.prisma.$transaction([
+      this.prisma.dataScope.count({ where: { projectId: id } }),
+      this.prisma.expenseReport.count({ where: { projectId: id } }),
+      this.prisma.expenseReportItem.count({ where: { projectId: id } }),
+      this.prisma.budget.count({ where: { projectId: id } }),
+      this.prisma.glAccountMapping.count({ where: { projectId: id, deletedAt: null } }),
+      this.prisma.glVoucherLine.count({ where: { projectId: id } }),
+    ]);
+    return [dataScopes, reports, reportItems, budgets, accountMappings, voucherLines].some((count) => count > 0);
   }
 
   private async ensureExists(id: string) {

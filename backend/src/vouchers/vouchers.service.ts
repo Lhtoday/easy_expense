@@ -132,18 +132,22 @@ export class VouchersService {
     this.ensurePermission(user, 'gl:account:write');
     const before = await this.ensureSubject(id);
     return this.prisma.$transaction(async (tx) => {
-      const subject = await tx.glAccountSubject.update({
-        where: { id },
-        data: { status: GlStatus.DISABLED, deletedAt: new Date(), updatedById: user.id },
-        select: this.subjectSelect(),
-      });
+      const referenced = await this.subjectHasReferences(tx, before.code);
+      const subject = referenced
+        ? await tx.glAccountSubject.update({
+            where: { id },
+            data: { status: GlStatus.DISABLED, updatedById: user.id },
+            select: this.subjectSelect(),
+          })
+        : await tx.glAccountSubject.delete({ where: { id }, select: this.subjectSelect() });
       await this.audit.recordWithClient(tx, {
         operator: user,
         action: SystemAuditAction.ACCOUNT_SUBJECT_DISABLE,
         entityType: 'gl-account-subject',
         entityId: id,
         before,
-        after: subject,
+        after: referenced ? subject : null,
+        metadata: { physicalDeleted: !referenced },
       });
       return subject;
     });
@@ -208,9 +212,8 @@ export class VouchersService {
     this.ensurePermission(user, 'gl:account:write');
     const before = await this.ensureMapping(id);
     return this.prisma.$transaction(async (tx) => {
-      const mapping = await tx.glAccountMapping.update({
+      const mapping = await tx.glAccountMapping.delete({
         where: { id },
-        data: { status: GlStatus.DISABLED, deletedAt: new Date(), updatedById: user.id },
         select: this.mappingSelect(),
       });
       await this.audit.recordWithClient(tx, {
@@ -219,7 +222,8 @@ export class VouchersService {
         entityType: 'gl-account-mapping',
         entityId: id,
         before,
-        after: mapping,
+        after: null,
+        metadata: { physicalDeleted: true },
       });
       return mapping;
     });
@@ -943,6 +947,18 @@ export class VouchersService {
     if (!subject) {
       throw new BadRequestException('会计科目不存在或已停用');
     }
+  }
+
+  private async subjectHasReferences(tx: Prisma.TransactionClient, code: string) {
+    const [expenseTypes, reportItems, budgets, budgetOccupations, accountMappings, voucherLines] = await Promise.all([
+      tx.expenseType.count({ where: { defaultAccountSubjectCode: code, deletedAt: null } }),
+      tx.expenseReportItem.count({ where: { accountSubjectCode: code } }),
+      tx.budget.count({ where: { accountSubjectCode: code } }),
+      tx.budgetOccupation.count({ where: { accountSubjectCode: code } }),
+      tx.glAccountMapping.count({ where: { accountSubjectCode: code, deletedAt: null } }),
+      tx.glVoucherLine.count({ where: { accountSubjectCode: code } }),
+    ]);
+    return [expenseTypes, reportItems, budgets, budgetOccupations, accountMappings, voucherLines].some((count) => count > 0);
   }
 
   private ensurePermission(user: AuthenticatedUser, permission: string) {

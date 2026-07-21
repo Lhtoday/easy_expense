@@ -44,11 +44,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return undefined;
     }
 
+    const target = Array.isArray(exception.meta?.target) ? exception.meta.target.join(', ') : String(exception.meta?.target ?? '');
+    if (exception.code === 'P2020') {
+      return '金额或数字过大，超出当前字段可保存范围。请调低金额或拆分数据后再保存。';
+    }
+
+    if (exception.code === 'P2003') {
+      return `关联的基础资料不存在或已被删除，请重新选择后保存。${target ? `字段：${target}` : ''}`;
+    }
+
     if (exception.code !== 'P2002') {
       return undefined;
     }
 
-    const target = Array.isArray(exception.meta?.target) ? exception.meta.target.join(', ') : String(exception.meta?.target ?? '');
     if (target.includes('code')) {
       return '编码已存在，请更换后再保存';
     }
