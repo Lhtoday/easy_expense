@@ -289,3 +289,4 @@
 - 已修复 `ReportsModule` 缺少 `IdentityModule` 导入导致 `CurrentUserGuard` 无法解析 `AuthService` 的启动风险，并在 `docs/acceptance-issue-log.md` 记录 ISSUE-20260722-01 为 fixed and verified。
 - 验证通过：`/api/health`、管理员登录、`/api/reports/dashboard`、`/api/reports/audit-chain?page=1&pageSize=5`、浏览器 `经营看板`/`审计日志` 页面 smoke、`npm.cmd run lint --workspace backend`、`npm.cmd run build --workspace backend`、`npm.cmd run test --workspace backend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace frontend`、Prisma migration status。前端构建仍只有既有大 chunk 提示。
 - 当前状态：Phase 10 首批能力完成并可用；阶段仍在进行中，后续继续细化高级筛选、钻取、导出和专题报表。
+- 进度已提交并推送：`e6aec64` 已于 2026-07-23 推送到 `origin/main`，分支 `main`。
