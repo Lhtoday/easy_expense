@@ -1,6 +1,8 @@
 ﻿import {
   ApartmentOutlined,
+  AuditOutlined,
   BankOutlined,
+  BarChartOutlined,
   CheckCircleOutlined,
   ControlOutlined,
   DeleteOutlined,
@@ -80,6 +82,8 @@ type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 type DetailSectionKey = 'summary' | 'invoice' | 'policy' | 'budget' | 'voucher';
 type DetailSectionStatus = 'PASS' | 'WARNING' | 'BLOCK' | 'PENDING' | 'INFO';
 type ResourceKey =
+  | 'reports'
+  | 'audit-logs'
   | 'expense-reports'
   | 'approvals'
   | 'finance-reviews'
@@ -516,6 +520,75 @@ interface BudgetReconcileResult {
   skipped: Array<{ itemId: string; reason: string }>;
 }
 
+interface ReportDimensionRow {
+  key: string;
+  code: string;
+  name: string;
+  reportCount: number;
+  itemCount: number;
+  amountCents: number;
+  reimbursableCents: number;
+  paidAmountCents: number;
+}
+
+interface BudgetExecutionRow extends BudgetRecord {
+  usedCents: number;
+  availableCents: number;
+  executionBps: number;
+}
+
+interface ApprovalLatencyRow {
+  nodeCode: string;
+  nodeName: string;
+  taskCount: number;
+  totalHours: number;
+  maxHours: number;
+  averageHours: number;
+}
+
+interface ExceptionAnalysisRow {
+  result: string;
+  message: string;
+  count: number;
+}
+
+interface ReportsDashboardRecord {
+  summary: {
+    reportCount: number;
+    reimbursableCents: number;
+    paidAmountCents: number;
+    pendingPaymentCents: number;
+    voucherConfirmedCount: number;
+    auditCount: number;
+    byStatus: Record<string, { count: number; reimbursableCents: number }>;
+  };
+  byDepartment: ReportDimensionRow[];
+  byCostCenter: ReportDimensionRow[];
+  byProject: ReportDimensionRow[];
+  budgetExecution: BudgetExecutionRow[];
+  approvalLatency: ApprovalLatencyRow[];
+  exceptions: {
+    policy: ExceptionAnalysisRow[];
+    budget: ExceptionAnalysisRow[];
+    duplicateInvoiceCount: number;
+    duplicateInvoiceAmountCents: number;
+    unlinkedInvoiceCount: number;
+    unlinkedInvoiceAmountCents: number;
+  };
+}
+
+interface AuditLogRecord {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  actorEmail?: string | null;
+  comment?: string | null;
+  success: boolean;
+  createdAt: string;
+  operator?: { id: string; name: string; email: string } | null;
+}
+
 interface ExpenseFormValues {
   title: string;
   departmentId?: string;
@@ -596,6 +669,8 @@ const resources: Array<{
   readPermission: string;
   writePermission: string;
 }> = [
+  { key: 'reports', label: '经营看板', icon: <BarChartOutlined />, readPermission: 'report:dashboard:read', writePermission: 'report:dashboard:read' },
+  { key: 'audit-logs', label: '审计日志', icon: <AuditOutlined />, readPermission: 'sys:audit:read', writePermission: 'sys:audit:read' },
   { key: 'expense-reports', label: '报销单', icon: <FileTextOutlined />, readPermission: 'exp:report:read', writePermission: 'exp:report:write' },
   { key: 'approvals', label: '审批任务', icon: <CheckCircleOutlined />, readPermission: 'exp:approval:read', writePermission: 'exp:approval:approve' },
   { key: 'finance-reviews', label: '财务审核', icon: <SafetyOutlined />, readPermission: 'exp:finance-review:read', writePermission: 'exp:finance-review:review' },
@@ -715,11 +790,22 @@ function apiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function dateRangeParams(range: [Dayjs | null, Dayjs | null] | null) {
+  return {
+    startDate: range?.[0]?.format('YYYY-MM-DD'),
+    endDate: range?.[1]?.format('YYYY-MM-DD'),
+  };
+}
+
 export function App() {
   const [messageApi, contextHolder] = message.useMessage();
   const [sessionToken, setSessionToken] = useState(() => getToken());
   const [tokenVersion, setTokenVersion] = useState(0);
   const [activeResource, setActiveResource] = useState<ResourceKey>('expense-reports');
+  const [reportRange, setReportRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [auditRange, setAuditRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(10);
   const [editing, setEditing] = useState<BaseRecord | null>(null);
   const [expenseEditing, setExpenseEditing] = useState<ExpenseReportRecord | null>(null);
   const [expenseViewing, setExpenseViewing] = useState<ExpenseReportRecord | null>(null);
@@ -818,6 +904,8 @@ export function App() {
     },
     enabled:
       Boolean(me) &&
+      activeResource !== 'reports' &&
+      activeResource !== 'audit-logs' &&
       activeResource !== 'expense-reports' &&
       activeResource !== 'approvals' &&
       activeResource !== 'finance-reviews' &&
@@ -897,6 +985,30 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'approvals',
+  });
+
+  const reportsDashboardQuery = useQuery<ReportsDashboardRecord>({
+    queryKey: ['reports-dashboard', reportRange?.[0]?.format('YYYY-MM-DD'), reportRange?.[1]?.format('YYYY-MM-DD')],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<ReportsDashboardRecord>>('/reports/dashboard', {
+        headers: authHeaders(),
+        params: dateRangeParams(reportRange),
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'reports',
+  });
+
+  const auditLogsQuery = useQuery<PageResult<AuditLogRecord>>({
+    queryKey: ['audit-logs', auditPage, auditPageSize, auditRange?.[0]?.format('YYYY-MM-DD'), auditRange?.[1]?.format('YYYY-MM-DD')],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<AuditLogRecord>>>('/reports/audit-chain', {
+        headers: authHeaders(),
+        params: { page: auditPage, pageSize: auditPageSize, ...dateRangeParams(auditRange) },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'audit-logs',
   });
 
   const financeReviewsQuery = useQuery<PageResult<ExpenseReportRecord>>({
@@ -1336,7 +1448,7 @@ export function App() {
           <div className="brand-mark">EF</div>
           <div>
             <Text className="brand-title">ExpenseFlow</Text>
-            <Text className="brand-subtitle">Phase 4</Text>
+            <Text className="brand-subtitle">Phase 10</Text>
           </div>
         </div>
         <Menu
@@ -1350,7 +1462,11 @@ export function App() {
           <div>
             <Text className="page-title">{currentResource.label}管理</Text>
             <Text className="page-subtitle">
-              {activeResource === 'expense-reports'
+              {activeResource === 'reports'
+                ? '费用趋势、预算执行和异常分析'
+                : activeResource === 'audit-logs'
+                  ? '关键动作、操作者和业务对象链路'
+                  : activeResource === 'expense-reports'
                 ? '草稿、明细和审批状态'
                 : activeResource === 'approvals'
                   ? '待办、已办和审批记录'
@@ -1390,7 +1506,30 @@ export function App() {
           </Space>
         </Header>
         <Content className="app-content">
-          {activeResource === 'expense-reports' ? (
+          {activeResource === 'reports' ? (
+            <ReportsDashboardView
+              data={reportsDashboardQuery.data}
+              loading={reportsDashboardQuery.isLoading}
+              range={reportRange}
+              onRangeChange={setReportRange}
+            />
+          ) : activeResource === 'audit-logs' ? (
+            <AuditLogsView
+              data={auditLogsQuery.data}
+              loading={auditLogsQuery.isLoading}
+              page={auditPage}
+              pageSize={auditPageSize}
+              range={auditRange}
+              onPageChange={(page, pageSize) => {
+                setAuditPage(page);
+                setAuditPageSize(pageSize);
+              }}
+              onRangeChange={(range) => {
+                setAuditRange(range);
+                setAuditPage(1);
+              }}
+            />
+          ) : activeResource === 'expense-reports' ? (
             <ExpenseReportsView
               canWithdraw={canWithdrawExpense}
               canWrite={canWrite}
@@ -1621,6 +1760,194 @@ export function App() {
       </Modal>
     </Layout>
   );
+}
+
+function ReportsDashboardView({
+  data,
+  loading,
+  range,
+  onRangeChange,
+}: {
+  data?: ReportsDashboardRecord;
+  loading: boolean;
+  range: [Dayjs | null, Dayjs | null] | null;
+  onRangeChange: (range: [Dayjs | null, Dayjs | null] | null) => void;
+}) {
+  const statusRows = Object.entries(data?.summary.byStatus ?? {}).map(([status, value]) => ({ status, ...value }));
+  return (
+    <Space direction="vertical" size={18} className="report-dashboard">
+      <div className="table-toolbar">
+        <Space className="expense-filters" wrap>
+          <DatePicker.RangePicker value={range} onChange={(value) => onRangeChange(value)} />
+        </Space>
+      </div>
+      <div className="metric-grid">
+        <Metric label="报销单数" value={String(data?.summary.reportCount ?? 0)} />
+        <Metric label="可报销金额" value={formatMoney(data?.summary.reimbursableCents ?? 0)} />
+        <Metric label="已付金额" value={formatMoney(data?.summary.paidAmountCents ?? 0)} />
+        <Metric label="待付金额" value={formatMoney(data?.summary.pendingPaymentCents ?? 0)} />
+        <Metric label="凭证确认" value={`${data?.summary.voucherConfirmedCount ?? 0} 单`} />
+        <Metric label="审计记录" value={`${data?.summary.auditCount ?? 0} 条`} />
+      </div>
+      <div className="report-grid">
+        <section>
+          <ReportSectionTitle title="部门费用" />
+          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byDepartment ?? []} columns={dimensionReportColumns()} pagination={false} scroll={{ x: 680 }} />
+        </section>
+        <section>
+          <ReportSectionTitle title="成本中心费用" />
+          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byCostCenter ?? []} columns={dimensionReportColumns()} pagination={false} scroll={{ x: 680 }} />
+        </section>
+        <section>
+          <ReportSectionTitle title="项目费用" />
+          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byProject ?? []} columns={dimensionReportColumns()} pagination={false} scroll={{ x: 680 }} />
+        </section>
+        <section>
+          <ReportSectionTitle title="单据状态" />
+          <Table rowKey="status" size="small" loading={loading} dataSource={statusRows} columns={statusReportColumns()} pagination={false} />
+        </section>
+      </div>
+      <section>
+        <ReportSectionTitle title="预算执行" />
+        <Table rowKey="id" size="small" loading={loading} dataSource={data?.budgetExecution ?? []} columns={budgetExecutionColumns()} pagination={{ pageSize: 8 }} scroll={{ x: 980 }} />
+      </section>
+      <div className="report-grid">
+        <section>
+          <ReportSectionTitle title="审批耗时" />
+          <Table rowKey="nodeCode" size="small" loading={loading} dataSource={data?.approvalLatency ?? []} columns={approvalLatencyColumns()} pagination={false} />
+        </section>
+        <section>
+          <ReportSectionTitle title="超标与异常" />
+          <Space direction="vertical" className="detail-check-panel-body">
+            <Alert
+              type="warning"
+              showIcon
+              message={`重复发票 ${data?.exceptions.duplicateInvoiceCount ?? 0} 张 / ${formatMoney(data?.exceptions.duplicateInvoiceAmountCents ?? 0)}，未关联发票 ${
+                data?.exceptions.unlinkedInvoiceCount ?? 0
+              } 张 / ${formatMoney(data?.exceptions.unlinkedInvoiceAmountCents ?? 0)}`}
+            />
+            <Table rowKey={(record) => `${record.result}-${record.message}`} size="small" loading={loading} dataSource={[...(data?.exceptions.policy ?? []), ...(data?.exceptions.budget ?? [])]} columns={exceptionColumns()} pagination={false} />
+          </Space>
+        </section>
+      </div>
+    </Space>
+  );
+}
+
+function AuditLogsView({
+  data,
+  loading,
+  page,
+  pageSize,
+  range,
+  onPageChange,
+  onRangeChange,
+}: {
+  data?: PageResult<AuditLogRecord>;
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  range: [Dayjs | null, Dayjs | null] | null;
+  onPageChange: (page: number, pageSize: number) => void;
+  onRangeChange: (range: [Dayjs | null, Dayjs | null] | null) => void;
+}) {
+  return (
+    <Space direction="vertical" size={16} className="detail-check-panel-body">
+      <div className="table-toolbar">
+        <Space className="expense-filters" wrap>
+          <DatePicker.RangePicker value={range} onChange={(value) => onRangeChange(value)} />
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        loading={loading}
+        dataSource={data?.items ?? []}
+        columns={auditLogColumns()}
+        pagination={{ current: page, pageSize, total: data?.total ?? 0, onChange: onPageChange }}
+        scroll={{ x: 980 }}
+      />
+    </Space>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metric-tile">
+      <Text type="secondary">{label}</Text>
+      <Text className="metric-value">{value}</Text>
+    </div>
+  );
+}
+
+function ReportSectionTitle({ title }: { title: string }) {
+  return (
+    <div className="section-heading">
+      <Text strong>{title}</Text>
+    </div>
+  );
+}
+
+function dimensionReportColumns(): ColumnsType<ReportDimensionRow> {
+  return [
+    { title: '编码', dataIndex: 'code', width: 110 },
+    { title: '名称', dataIndex: 'name', width: 160 },
+    { title: '单据', dataIndex: 'reportCount', width: 80, align: 'right' },
+    { title: '明细', dataIndex: 'itemCount', width: 80, align: 'right' },
+    { title: '费用金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
+    { title: '可报销', dataIndex: 'reimbursableCents', width: 120, align: 'right', render: formatMoney },
+    { title: '已付', dataIndex: 'paidAmountCents', width: 120, align: 'right', render: formatMoney },
+  ];
+}
+
+function statusReportColumns(): ColumnsType<{ status: string; count: number; reimbursableCents: number }> {
+  return [
+    { title: '状态', dataIndex: 'status', width: 150, render: (value: ExpenseStatus) => <ExpenseStatusTag status={value} /> },
+    { title: '单据', dataIndex: 'count', width: 80, align: 'right' },
+    { title: '可报销金额', dataIndex: 'reimbursableCents', align: 'right', render: formatMoney },
+  ];
+}
+
+function budgetExecutionColumns(): ColumnsType<BudgetExecutionRow> {
+  return [
+    { title: '期间', dataIndex: 'fiscalPeriod', width: 110 },
+    { title: '预算', dataIndex: 'name', width: 180 },
+    { title: '总额', dataIndex: 'totalCents', width: 120, align: 'right', render: formatMoney },
+    { title: '在途', dataIndex: 'inTransitCents', width: 120, align: 'right', render: formatMoney },
+    { title: '已确认', dataIndex: 'approvedCents', width: 120, align: 'right', render: formatMoney },
+    { title: '实际', dataIndex: 'actualCents', width: 120, align: 'right', render: formatMoney },
+    { title: '可用', dataIndex: 'availableCents', width: 120, align: 'right', render: formatMoney },
+    { title: '执行率', dataIndex: 'executionBps', width: 100, align: 'right', render: formatBps },
+    { title: '控制', dataIndex: 'controlMode', width: 110, render: budgetControlModeName },
+  ];
+}
+
+function approvalLatencyColumns(): ColumnsType<ApprovalLatencyRow> {
+  return [
+    { title: '节点', dataIndex: 'nodeName', width: 160 },
+    { title: '任务数', dataIndex: 'taskCount', width: 90, align: 'right' },
+    { title: '平均小时', dataIndex: 'averageHours', width: 110, align: 'right' },
+    { title: '最长小时', dataIndex: 'maxHours', width: 110, align: 'right', render: (value: number) => Math.round(value * 10) / 10 },
+  ];
+}
+
+function exceptionColumns(): ColumnsType<ExceptionAnalysisRow> {
+  return [
+    { title: '级别', dataIndex: 'result', width: 110, render: (value: string) => <Tag color={value === 'BLOCK' ? 'error' : 'warning'}>{value}</Tag> },
+    { title: '问题', dataIndex: 'message' },
+    { title: '次数', dataIndex: 'count', width: 80, align: 'right' },
+  ];
+}
+
+function auditLogColumns(): ColumnsType<AuditLogRecord> {
+  return [
+    { title: '时间', dataIndex: 'createdAt', width: 170, render: formatDateTime },
+    { title: '动作', dataIndex: 'action', width: 180 },
+    { title: '对象', dataIndex: 'entityType', width: 120 },
+    { title: '对象ID', dataIndex: 'entityId', width: 180, render: (value?: string | null) => value ?? '-' },
+    { title: '操作者', width: 160, render: (_: unknown, record) => record.operator?.name ?? record.actorEmail ?? '-' },
+    { title: '结果', dataIndex: 'success', width: 90, render: (value: boolean) => <Tag color={value ? 'success' : 'error'}>{value ? '成功' : '失败'}</Tag> },
+    { title: '备注', dataIndex: 'comment', width: 220, render: (value?: string | null) => value ?? '-' },
+  ];
 }
 
 function MasterDataView({
@@ -5164,4 +5491,12 @@ function centsToYuan(value: number) {
 
 function formatMoney(value: number) {
   return `¥${centsToYuan(value)}`;
+}
+
+function formatBps(value: number) {
+  return `${(value / 100).toFixed(1)}%`;
+}
+
+function formatDateTime(value?: string | null) {
+  return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-';
 }

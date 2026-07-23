@@ -27,6 +27,21 @@ This file records user-reported testing issues before code changes are made.
 
 ## Issues
 
+### ISSUE-20260722-01 - Backend Startup Fails Because ReportsModule Cannot Resolve AuthService
+
+- Date: 2026-07-22
+- Area: Backend / Reports module / Authentication guard wiring
+- Status: fixed and verified
+- User report: During project startup, backend does not become healthy at `http://localhost:3000/api/health`.
+- Observed behavior: Docker dependencies are healthy, Prisma Client generation succeeds, and migrations are up to date. Backend compilation succeeds with 0 TypeScript errors, but Nest application startup fails before listening on port 3000.
+- Expected behavior: Backend should start successfully after dependencies are healthy, and `/api/health` should return OK before frontend startup is considered complete.
+- Impact: High. The project cannot complete local startup because the backend API never binds to port 3000.
+- Suspected cause: `ReportsModule` uses `CurrentUserGuard`, which depends on `AuthService`, but `ReportsModule` currently imports only `PrismaModule`. `AuthService` and `CurrentUserGuard` are exported by `IdentityModule`, so the reports module likely needs to import `IdentityModule` or use a shared auth module pattern.
+- Change idea: Add the module that exports `AuthService`/`CurrentUserGuard` to `ReportsModule` imports, likely `IdentityModule`, and verify there is no circular dependency. If a circular dependency appears, split guards/auth providers into a smaller shared authentication module and import that from feature modules.
+- Notes: Captured backend startup error: `Nest can't resolve dependencies of the CurrentUserGuard (?). Please make sure that the argument AuthService at index [0] is available in the ReportsModule context.`
+- Resolution: `ReportsModule` now imports `IdentityModule`, making `AuthService` and `CurrentUserGuard` available in the reports module context.
+- Verification: On 2026-07-23, `/api/health`, `/api/reports/dashboard`, `/api/reports/audit-chain`, and browser checks for `经营看板` / `审计日志` passed.
+
 ### ISSUE-20260618-01 - Expense Draft Form Has Repeated Dimension Fields
 
 - Date: 2026-06-18

@@ -13,6 +13,7 @@ import { IdentityModule } from './identity/identity.module';
 import { MasterDataModule } from './master-data/master-data.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ReportsModule } from './reports/reports.module';
 import { VouchersModule } from './vouchers/vouchers.module';
 
 @Module({
@@ -32,6 +33,7 @@ import { VouchersModule } from './vouchers/vouchers.module';
     FinanceReviewsModule,
     PaymentsModule,
     VouchersModule,
+    ReportsModule,
   ],
   controllers: [AppController, AuditController],
   providers: [AppService],

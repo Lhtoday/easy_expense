@@ -4,9 +4,9 @@
 
 ## 当前阶段
 
-- 阶段：Phase 9 - 凭证草稿
+- 阶段：Phase 10 - 审计、报表与看板
 - 状态：进行中
-- 开始时间：2026-06-22
+- 开始时间：2026-07-21
 - 完成时间：待定
 
 ## Phase 0 完成清单
@@ -120,8 +120,8 @@
 
 ## 下一阶段
 
-- 阶段：Phase 9 - 凭证草稿
-- 触发条件：仅在明确要求后启动，进入会计科目、科目映射、凭证草稿生成、凭证预览、财务确认和凭证审计追踪。
+- 阶段：Phase 10 - 审计、报表与看板继续开发
+- 触发条件：首批看板和审计日志入口已完成并验证；后续继续细化审计高级查询、部门/项目/成本中心报表、预算执行报表、超标分析、发票异常分析、导出和单据钻取。
 
 ## Phase 7 财务审核清单
 
@@ -213,6 +213,18 @@
 - [x] 验证完成：Prisma client generation、本地 migration deploy/status、后端测试、后端 lint/build、前端 lint/build。
 - [x] 进度已记录并推送：实现提交 `ccd780d` 已于 2026-06-17 推送到 `origin/main`。
 
+## Phase 10 审计、报表与看板首批清单
+
+- [x] 新增后端 `reports` 模块，提供 `GET /reports/dashboard` 和 `GET /reports/audit-chain`。
+- [x] 新增 `report:dashboard:read` 权限，并通过 migration `20260721110000_phase10_reports_dashboard` 为 ADMIN 角色授权。
+- [x] 前端新增 `经营看板` 菜单，展示报销单数、可报销金额、已付金额、待付金额、凭证确认数和审计记录数。
+- [x] 经营看板展示部门、成本中心、项目费用汇总和单据状态分布。
+- [x] 经营看板展示预算执行、审批耗时、政策/预算异常、重复发票和未关联发票分析。
+- [x] 前端新增 `审计日志` 菜单，分页展示系统审计日志的时间、动作、对象、操作者、结果和备注。
+- [x] `ReportsModule` 已导入 `IdentityModule`，修复 `CurrentUserGuard` 依赖 `AuthService` 的启动风险。
+- [x] 验证完成：后端健康检查、管理员登录、看板 API、审计链路 API、浏览器页面 smoke、后端 test/lint/build、前端 lint/build、Prisma migration status。
+- [ ] 后续细化：审计高级筛选、部门/项目/成本中心报表钻取、预算执行报表过滤、超标与发票异常专题报表、导出能力和单据明细跳转。
+
 ## 工作流技能记录
 
 - 2026-06-18：新增项目技能 `expenseflow-submit-progress`，用于完成或中断开发后的提交、推送和进度记录流程。
@@ -268,3 +280,12 @@
 - 已提交并推送 `cf30629` 到 `origin/main`：完成主数据未引用物理删除/已引用停用、预算新增维度和金额上限校验、预算外键/数字溢出友好错误、报销单金额保存错误透传与前端联动校验、凭证科目/映射删除规则补强，以及出纳付款阶段后续优化建议记录。
 - 验证通过：`npm.cmd run test --workspace backend -- master-data.service.spec.ts expense-policies.service.spec.ts budgets.service.spec.ts vouchers.service.spec.ts`、`npm.cmd run lint --workspace backend`、`npm.cmd run build --workspace backend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace frontend`。前端构建仍只有既有大 chunk 提示。
 - 当前状态：Phase 9 凭证确认闭环可作为完整流程终态；Phase 10 建议按路线图进入“审计、报表与看板”，优先从归档详情、审计查询、预算执行报表开始。后续仍需单独设计已确认凭证冲销/作废、出纳退回财务审核或暂挂/待处理。
+
+## 2026-07-23 Phase 10 首批开发与验证记录
+
+- Phase 10 已启动并完成首批可用版本：新增经营看板、审计日志入口、后端 `reports` 查询模块、`report:dashboard:read` 权限和 ADMIN 授权 migration。
+- 经营看板已覆盖费用趋势指标、部门/成本中心/项目费用汇总、单据状态分布、预算执行、审批耗时和政策/预算/发票异常分析。
+- 审计日志页已可分页查看系统审计记录，并展示动作、对象、操作者、结果和备注。
+- 已修复 `ReportsModule` 缺少 `IdentityModule` 导入导致 `CurrentUserGuard` 无法解析 `AuthService` 的启动风险，并在 `docs/acceptance-issue-log.md` 记录 ISSUE-20260722-01 为 fixed and verified。
+- 验证通过：`/api/health`、管理员登录、`/api/reports/dashboard`、`/api/reports/audit-chain?page=1&pageSize=5`、浏览器 `经营看板`/`审计日志` 页面 smoke、`npm.cmd run lint --workspace backend`、`npm.cmd run build --workspace backend`、`npm.cmd run test --workspace backend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace frontend`、Prisma migration status。前端构建仍只有既有大 chunk 提示。
+- 当前状态：Phase 10 首批能力完成并可用；阶段仍在进行中，后续继续细化高级筛选、钻取、导出和专题报表。

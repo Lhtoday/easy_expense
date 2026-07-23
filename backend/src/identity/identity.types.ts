@@ -23,6 +23,7 @@ export const DEFAULT_PERMISSIONS = [
   { code: 'exp:payment:read', name: '查看出纳付款', description: '查看待付款报销单、付款批次和付款记录' },
   { code: 'exp:payment:pay', name: '登记出纳付款', description: '登记付款成功、付款失败和重新付款' },
   { code: 'sys:audit:read', name: '查看系统审计', description: '查看登录、权限、附件访问、预算和政策配置等系统审计记录' },
+  { code: 'report:dashboard:read', name: '查看经营看板', description: '查看费用趋势、预算执行、审批耗时和异常分析' },
   { code: 'gl:account:read', name: '查看会计科目', description: '查看会计科目和费用类型科目映射' },
   { code: 'gl:account:write', name: '维护会计科目', description: '维护会计科目、员工往来科目和费用类型科目映射' },
   { code: 'gl:voucher:read', name: '查看凭证草稿', description: '查看凭证草稿、凭证明细和生成依据' },

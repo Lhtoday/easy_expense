@@ -391,6 +391,42 @@ body {
   margin-top: 18px;
 }
 
+.report-dashboard {
+  width: 100%;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.metric-tile {
+  display: grid;
+  gap: 6px;
+  min-height: 72px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.section-heading {
+  margin-bottom: 10px;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;
@@ -446,8 +482,13 @@ body {
   .invoice-sub-form,
   .policy-grid,
   .account-settings-grid,
-  .account-mapping-form-grid {
+    .account-mapping-form-grid,
+    .report-grid {
     grid-template-columns: 1fr;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .expense-folder-tabs {
