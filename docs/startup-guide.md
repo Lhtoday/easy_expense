@@ -12,6 +12,16 @@ cd E:\codex\code\expense
 
 适用于 `node_modules` 已安装、Docker Desktop 已启动、数据库迁移已应用的日常开发场景。
 
+### 2.0 启动前快速检查
+
+需要先了解本机当前状态时，可运行：
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts\check-local.ps1
+```
+
+该脚本会检查 Docker Compose 服务和本项目相关的本地进程。它是诊断辅助命令，不是启动前置条件；如果 Docker Desktop 未运行，可能先报 `failed to connect to the docker API`。如果当前 PowerShell 权限不足，也可能在读取 `Win32_Process` 时出现 `拒绝访问`，此时按下文分别检查 Docker 和服务健康状态即可。
+
 ### 2.1 确认基础依赖
 
 ```powershell
@@ -53,6 +63,12 @@ npm.cmd run dev:backend
 http://localhost:3000/api/health
 ```
 
+命令行验证：
+
+```powershell
+Invoke-RestMethod -Uri 'http://localhost:3000/api/health' -TimeoutSec 5
+```
+
 ### 2.4 启动前端
 
 另开一个 PowerShell 窗口运行：
@@ -66,6 +82,12 @@ npm.cmd run dev:frontend
 
 ```text
 http://localhost:5173
+```
+
+命令行验证：
+
+```powershell
+Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 5
 ```
 
 ## 3. 后台启动方式
@@ -121,13 +143,29 @@ npm.cmd install
 
 ### 4.2 Docker Desktop 未启动
 
-如果出现类似 `failed to connect to the docker API`，先启动 Docker Desktop，等待 10 到 30 秒，再运行：
+如果出现类似以下报错，说明 Docker engine 尚未就绪：
+
+```text
+failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine
+failed to connect to the docker API at npipe:////./pipe/docker_engine
+WARNING: Error loading config file: open C:\Users\Administrator\.docker\config.json: Access is denied.
+```
+
+先启动 Docker Desktop：
+
+```powershell
+Start-Process -FilePath 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+```
+
+等待 20 到 30 秒，再运行：
 
 ```powershell
 docker ps
 docker-compose up -d postgres redis minio
 docker-compose ps
 ```
+
+`docker ps` 能成功返回时，即使列表为空，也表示 Docker engine 已可访问。随后再启动本项目的 `postgres`、`redis` 和 `minio` 容器。
 
 ### 4.3 数据库连接串
 
