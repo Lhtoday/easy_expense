@@ -427,6 +427,43 @@ body {
   margin-bottom: 10px;
 }
 
+.audit-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: center;
+}
+
+.audit-filter-panel .ant-input-search,
+.audit-filter-panel .ant-select,
+.audit-filter-panel .ant-picker {
+  width: 100%;
+}
+
+.audit-log-expanded {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.audit-json-block {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.audit-json-block pre {
+  max-height: 260px;
+  padding: 10px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
 @media (max-width: 720px) {
   .app-header {
     height: auto;
@@ -483,7 +520,9 @@ body {
   .policy-grid,
   .account-settings-grid,
     .account-mapping-form-grid,
-    .report-grid {
+    .report-grid,
+    .audit-filter-panel,
+    .audit-log-expanded {
     grid-template-columns: 1fr;
   }
 

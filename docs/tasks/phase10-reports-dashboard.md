@@ -50,3 +50,11 @@
 - 使用 `admin@expenseflow.local` / `Admin123!` 登录后，`GET /reports/dashboard` 返回看板汇总、预算执行和异常分析数据。
 - `GET /reports/audit-chain?page=1&pageSize=5` 返回审计日志分页数据。
 - 前端 `http://localhost:5173` 登录后可见 `经营看板` 和 `审计日志` 菜单；两个页面均可渲染真实数据，浏览器控制台未出现页面错误。
+
+## 2026-08-11 增量
+
+- 后端 `GET /reports/audit-chain` 新增筛选参数：`action`、`entityType`、`entityId`、`operatorId`、`actorEmail`、`success`、`keyword`、`startDate`、`endDate`。
+- 审计日志接口返回 `beforeData`、`afterData` 和 `metadata`，用于核对配置、权限、预算、凭证等关键动作的变更细节。
+- 前端 `审计日志` 页面新增高级筛选栏，支持按动作、结果、对象、操作者、邮箱、日期范围和关键字筛选。
+- 前端审计日志表格支持展开查看变更前、变更后和元数据 JSON。
+- 验证通过：后端 lint/build/test、前端 lint/build、后端健康检查、管理员登录、审计链路 keyword 筛选 API、动作+结果+对象类型筛选 API。

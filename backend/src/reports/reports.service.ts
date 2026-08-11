@@ -155,7 +155,7 @@ export class ReportsService {
     this.ensurePermission(user, 'sys:audit:read');
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const where: Prisma.SystemAuditLogWhereInput = { createdAt: this.dateRange(query) };
+    const where = this.auditWhere(query);
     const [items, total] = await this.prisma.$transaction([
       this.prisma.systemAuditLog.findMany({
         where,
@@ -168,6 +168,9 @@ export class ReportsService {
           entityType: true,
           entityId: true,
           actorEmail: true,
+          beforeData: true,
+          afterData: true,
+          metadata: true,
           comment: true,
           success: true,
           createdAt: true,
@@ -177,6 +180,29 @@ export class ReportsService {
       this.prisma.systemAuditLog.count({ where }),
     ]);
     return { items, page, pageSize, total };
+  }
+
+  private auditWhere(query: AuditReportQueryDto): Prisma.SystemAuditLogWhereInput {
+    const keyword = query.keyword?.trim();
+    return {
+      createdAt: this.dateRange(query),
+      action: query.action,
+      entityType: this.optionalContains(query.entityType),
+      entityId: this.optionalContains(query.entityId),
+      operatorId: this.optionalString(query.operatorId),
+      actorEmail: this.optionalContains(query.actorEmail),
+      success: query.success === undefined ? undefined : query.success === 'true',
+      OR: keyword
+        ? [
+            { entityType: { contains: keyword, mode: 'insensitive' } },
+            { entityId: { contains: keyword, mode: 'insensitive' } },
+            { actorEmail: { contains: keyword, mode: 'insensitive' } },
+            { comment: { contains: keyword, mode: 'insensitive' } },
+            { operator: { is: { name: { contains: keyword, mode: 'insensitive' } } } },
+            { operator: { is: { email: { contains: keyword, mode: 'insensitive' } } } },
+          ]
+        : undefined,
+    };
   }
 
   private summary(
@@ -288,6 +314,16 @@ export class ReportsService {
       throw new BadRequestException(`${label} is not a valid date.`);
     }
     return date;
+  }
+
+  private optionalString(value?: string) {
+    const normalized = value?.trim();
+    return normalized || undefined;
+  }
+
+  private optionalContains(value?: string): Prisma.StringFilter | undefined {
+    const normalized = this.optionalString(value);
+    return normalized ? { contains: normalized, mode: 'insensitive' } : undefined;
   }
 
   private dimensionSelect() {

@@ -223,7 +223,8 @@
 - [x] 前端新增 `审计日志` 菜单，分页展示系统审计日志的时间、动作、对象、操作者、结果和备注。
 - [x] `ReportsModule` 已导入 `IdentityModule`，修复 `CurrentUserGuard` 依赖 `AuthService` 的启动风险。
 - [x] 验证完成：后端健康检查、管理员登录、看板 API、审计链路 API、浏览器页面 smoke、后端 test/lint/build、前端 lint/build、Prisma migration status。
-- [ ] 后续细化：审计高级筛选、部门/项目/成本中心报表钻取、预算执行报表过滤、超标与发票异常专题报表、导出能力和单据明细跳转。
+- [x] 审计日志高级筛选：支持动作、对象类型、对象 ID、操作者 ID、操作者邮箱、成功/失败、日期范围和关键字筛选，并可展开查看 before/after/metadata 明细。
+- [ ] 后续细化：部门/项目/成本中心报表钻取、预算执行报表过滤、超标与发票异常专题报表、导出能力和单据明细跳转。
 
 ## 工作流技能记录
 
@@ -290,3 +291,10 @@
 - 验证通过：`/api/health`、管理员登录、`/api/reports/dashboard`、`/api/reports/audit-chain?page=1&pageSize=5`、浏览器 `经营看板`/`审计日志` 页面 smoke、`npm.cmd run lint --workspace backend`、`npm.cmd run build --workspace backend`、`npm.cmd run test --workspace backend`、`npm.cmd run lint --workspace frontend`、`npm.cmd run build --workspace frontend`、Prisma migration status。前端构建仍只有既有大 chunk 提示。
 - 当前状态：Phase 10 首批能力完成并可用；阶段仍在进行中，后续继续细化高级筛选、钻取、导出和专题报表。
 - 进度已提交并推送：`e6aec64` 已于 2026-07-23 推送到 `origin/main`，分支 `main`。
+
+## 2026-08-11 Phase 10 审计日志高级查询增量
+
+- Phase 10 审计日志高级查询已完成：后端 `GET /reports/audit-chain` 新增动作、对象类型、对象 ID、操作者 ID、操作者邮箱、成功/失败、日期范围和关键字筛选。
+- 审计日志接口已返回 `beforeData`、`afterData` 和 `metadata`，前端 `审计日志` 页面支持筛选栏和展开行查看 JSON 明细，便于核对配置、权限、预算、凭证等关键动作的变更细节。
+- 验证通过：后端 lint/build/test、前端 lint/build、后端健康检查、管理员登录、审计链路 keyword 筛选 API、动作+结果+对象类型筛选 API。
+- 当前状态：Phase 10 仍在进行中；审计高级查询已完成，下一步优先推进部门/项目/成本中心报表钻取、预算执行报表过滤、异常专题报表、导出能力和单据明细跳转。

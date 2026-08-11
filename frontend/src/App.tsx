@@ -78,6 +78,43 @@ type GlStatus = 'ACTIVE' | 'DISABLED';
 type GlAccountCategory = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'COST' | 'EXPENSE' | 'REVENUE' | 'TAX';
 type GlNormalBalance = 'DEBIT' | 'CREDIT';
 type GlAccountMappingPurpose = 'EXPENSE_TYPE' | 'EMPLOYEE_PAYABLE' | 'INPUT_TAX' | 'BANK_PAYMENT';
+type SystemAuditAction =
+  | 'LOGIN_SUCCESS'
+  | 'LOGIN_FAILURE'
+  | 'TOKEN_INVALID'
+  | 'USER_CREATE'
+  | 'USER_UPDATE'
+  | 'USER_DISABLE'
+  | 'USER_ROLE_UPDATE'
+  | 'ROLE_CREATE'
+  | 'ROLE_UPDATE'
+  | 'ROLE_DISABLE'
+  | 'ROLE_PERMISSION_UPDATE'
+  | 'ATTACHMENT_PREVIEW'
+  | 'ATTACHMENT_DOWNLOAD'
+  | 'BUDGET_CREATE'
+  | 'BUDGET_UPDATE'
+  | 'BUDGET_ENABLE'
+  | 'BUDGET_DISABLE'
+  | 'EXPENSE_TYPE_CREATE'
+  | 'EXPENSE_TYPE_UPDATE'
+  | 'EXPENSE_TYPE_DISABLE'
+  | 'POLICY_CREATE'
+  | 'POLICY_UPDATE'
+  | 'POLICY_DISABLE'
+  | 'POLICY_RULE_CREATE'
+  | 'POLICY_RULE_UPDATE'
+  | 'POLICY_RULE_DISABLE'
+  | 'ACCOUNT_SUBJECT_CREATE'
+  | 'ACCOUNT_SUBJECT_UPDATE'
+  | 'ACCOUNT_SUBJECT_DISABLE'
+  | 'ACCOUNT_MAPPING_CREATE'
+  | 'ACCOUNT_MAPPING_UPDATE'
+  | 'ACCOUNT_MAPPING_DISABLE'
+  | 'VOUCHER_DRAFT_GENERATE'
+  | 'VOUCHER_REGENERATE'
+  | 'VOUCHER_CONFIRM'
+  | 'VOUCHER_VOID';
 type ApprovalTaskStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 type DetailSectionKey = 'summary' | 'invoice' | 'policy' | 'budget' | 'voucher';
 type DetailSectionStatus = 'PASS' | 'WARNING' | 'BLOCK' | 'PENDING' | 'INFO';
@@ -579,15 +616,20 @@ interface ReportsDashboardRecord {
 
 interface AuditLogRecord {
   id: string;
-  action: string;
+  action: SystemAuditAction;
   entityType: string;
   entityId?: string | null;
   actorEmail?: string | null;
+  beforeData?: unknown;
+  afterData?: unknown;
+  metadata?: unknown;
   comment?: string | null;
   success: boolean;
   createdAt: string;
   operator?: { id: string; name: string; email: string } | null;
 }
+
+type AuditSuccessFilter = 'true' | 'false';
 
 interface ExpenseFormValues {
   title: string;
@@ -767,6 +809,50 @@ const accountMappingPurposeOptions: Array<{ label: string; value: GlAccountMappi
   { label: '银行付款', value: 'BANK_PAYMENT' },
 ];
 
+const systemAuditActionOptions: Array<{ label: string; value: SystemAuditAction }> = [
+  { label: '登录成功', value: 'LOGIN_SUCCESS' },
+  { label: '登录失败', value: 'LOGIN_FAILURE' },
+  { label: '无效令牌', value: 'TOKEN_INVALID' },
+  { label: '新增用户', value: 'USER_CREATE' },
+  { label: '更新用户', value: 'USER_UPDATE' },
+  { label: '停用用户', value: 'USER_DISABLE' },
+  { label: '用户角色变更', value: 'USER_ROLE_UPDATE' },
+  { label: '新增角色', value: 'ROLE_CREATE' },
+  { label: '更新角色', value: 'ROLE_UPDATE' },
+  { label: '停用角色', value: 'ROLE_DISABLE' },
+  { label: '角色权限变更', value: 'ROLE_PERMISSION_UPDATE' },
+  { label: '附件预览', value: 'ATTACHMENT_PREVIEW' },
+  { label: '附件下载', value: 'ATTACHMENT_DOWNLOAD' },
+  { label: '新增预算', value: 'BUDGET_CREATE' },
+  { label: '更新预算', value: 'BUDGET_UPDATE' },
+  { label: '启用预算', value: 'BUDGET_ENABLE' },
+  { label: '停用预算', value: 'BUDGET_DISABLE' },
+  { label: '新增费用类型', value: 'EXPENSE_TYPE_CREATE' },
+  { label: '更新费用类型', value: 'EXPENSE_TYPE_UPDATE' },
+  { label: '停用费用类型', value: 'EXPENSE_TYPE_DISABLE' },
+  { label: '新增政策', value: 'POLICY_CREATE' },
+  { label: '更新政策', value: 'POLICY_UPDATE' },
+  { label: '停用政策', value: 'POLICY_DISABLE' },
+  { label: '新增政策规则', value: 'POLICY_RULE_CREATE' },
+  { label: '更新政策规则', value: 'POLICY_RULE_UPDATE' },
+  { label: '停用政策规则', value: 'POLICY_RULE_DISABLE' },
+  { label: '新增会计科目', value: 'ACCOUNT_SUBJECT_CREATE' },
+  { label: '更新会计科目', value: 'ACCOUNT_SUBJECT_UPDATE' },
+  { label: '停用会计科目', value: 'ACCOUNT_SUBJECT_DISABLE' },
+  { label: '新增科目映射', value: 'ACCOUNT_MAPPING_CREATE' },
+  { label: '更新科目映射', value: 'ACCOUNT_MAPPING_UPDATE' },
+  { label: '停用科目映射', value: 'ACCOUNT_MAPPING_DISABLE' },
+  { label: '生成凭证草稿', value: 'VOUCHER_DRAFT_GENERATE' },
+  { label: '重生成凭证', value: 'VOUCHER_REGENERATE' },
+  { label: '确认凭证', value: 'VOUCHER_CONFIRM' },
+  { label: '撤销凭证', value: 'VOUCHER_VOID' },
+];
+
+const auditSuccessOptions: Array<{ label: string; value: AuditSuccessFilter }> = [
+  { label: '成功', value: 'true' },
+  { label: '失败', value: 'false' },
+];
+
 function getToken() {
   return localStorage.getItem('expenseflow_token');
 }
@@ -804,6 +890,13 @@ export function App() {
   const [activeResource, setActiveResource] = useState<ResourceKey>('expense-reports');
   const [reportRange, setReportRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [auditRange, setAuditRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [auditKeyword, setAuditKeyword] = useState('');
+  const [auditAction, setAuditAction] = useState<SystemAuditAction | undefined>();
+  const [auditEntityType, setAuditEntityType] = useState('');
+  const [auditEntityId, setAuditEntityId] = useState('');
+  const [auditOperatorId, setAuditOperatorId] = useState('');
+  const [auditActorEmail, setAuditActorEmail] = useState('');
+  const [auditSuccess, setAuditSuccess] = useState<AuditSuccessFilter | undefined>();
   const [auditPage, setAuditPage] = useState(1);
   const [auditPageSize, setAuditPageSize] = useState(10);
   const [editing, setEditing] = useState<BaseRecord | null>(null);
@@ -1000,11 +1093,35 @@ export function App() {
   });
 
   const auditLogsQuery = useQuery<PageResult<AuditLogRecord>>({
-    queryKey: ['audit-logs', auditPage, auditPageSize, auditRange?.[0]?.format('YYYY-MM-DD'), auditRange?.[1]?.format('YYYY-MM-DD')],
+    queryKey: [
+      'audit-logs',
+      auditPage,
+      auditPageSize,
+      auditRange?.[0]?.format('YYYY-MM-DD'),
+      auditRange?.[1]?.format('YYYY-MM-DD'),
+      auditKeyword,
+      auditAction,
+      auditEntityType,
+      auditEntityId,
+      auditOperatorId,
+      auditActorEmail,
+      auditSuccess,
+    ],
     queryFn: async () => {
       const response = await api.get<ApiResponse<PageResult<AuditLogRecord>>>('/reports/audit-chain', {
         headers: authHeaders(),
-        params: { page: auditPage, pageSize: auditPageSize, ...dateRangeParams(auditRange) },
+        params: {
+          page: auditPage,
+          pageSize: auditPageSize,
+          ...dateRangeParams(auditRange),
+          keyword: auditKeyword || undefined,
+          action: auditAction,
+          entityType: auditEntityType || undefined,
+          entityId: auditEntityId || undefined,
+          operatorId: auditOperatorId || undefined,
+          actorEmail: auditActorEmail || undefined,
+          success: auditSuccess,
+        },
       });
       return response.data.data;
     },
@@ -1515,17 +1632,63 @@ export function App() {
             />
           ) : activeResource === 'audit-logs' ? (
             <AuditLogsView
+              action={auditAction}
+              actorEmail={auditActorEmail}
               data={auditLogsQuery.data}
+              entityId={auditEntityId}
+              entityType={auditEntityType}
+              keyword={auditKeyword}
               loading={auditLogsQuery.isLoading}
+              operatorId={auditOperatorId}
               page={auditPage}
               pageSize={auditPageSize}
               range={auditRange}
+              success={auditSuccess}
+              onActionChange={(action) => {
+                setAuditAction(action);
+                setAuditPage(1);
+              }}
+              onActorEmailChange={(value) => {
+                setAuditActorEmail(value.trim());
+                setAuditPage(1);
+              }}
+              onEntityIdChange={(value) => {
+                setAuditEntityId(value.trim());
+                setAuditPage(1);
+              }}
+              onEntityTypeChange={(value) => {
+                setAuditEntityType(value.trim());
+                setAuditPage(1);
+              }}
+              onKeywordSearch={(value) => {
+                setAuditKeyword(value.trim());
+                setAuditPage(1);
+              }}
+              onOperatorIdChange={(value) => {
+                setAuditOperatorId(value.trim());
+                setAuditPage(1);
+              }}
               onPageChange={(page, pageSize) => {
                 setAuditPage(page);
                 setAuditPageSize(pageSize);
               }}
               onRangeChange={(range) => {
                 setAuditRange(range);
+                setAuditPage(1);
+              }}
+              onReset={() => {
+                setAuditKeyword('');
+                setAuditAction(undefined);
+                setAuditEntityType('');
+                setAuditEntityId('');
+                setAuditOperatorId('');
+                setAuditActorEmail('');
+                setAuditSuccess(undefined);
+                setAuditRange(null);
+                setAuditPage(1);
+              }}
+              onSuccessChange={(success) => {
+                setAuditSuccess(success);
                 setAuditPage(1);
               }}
             />
@@ -1835,27 +1998,65 @@ function ReportsDashboardView({
 }
 
 function AuditLogsView({
+  action,
+  actorEmail,
   data,
+  entityId,
+  entityType,
+  keyword,
   loading,
+  operatorId,
   page,
   pageSize,
   range,
+  success,
+  onActionChange,
+  onActorEmailChange,
+  onEntityIdChange,
+  onEntityTypeChange,
+  onKeywordSearch,
+  onOperatorIdChange,
   onPageChange,
   onRangeChange,
+  onReset,
+  onSuccessChange,
 }: {
+  action?: SystemAuditAction;
+  actorEmail: string;
   data?: PageResult<AuditLogRecord>;
+  entityId: string;
+  entityType: string;
+  keyword: string;
   loading: boolean;
+  operatorId: string;
   page: number;
   pageSize: number;
   range: [Dayjs | null, Dayjs | null] | null;
+  success?: AuditSuccessFilter;
+  onActionChange: (action?: SystemAuditAction) => void;
+  onActorEmailChange: (value: string) => void;
+  onEntityIdChange: (value: string) => void;
+  onEntityTypeChange: (value: string) => void;
+  onKeywordSearch: (keyword: string) => void;
+  onOperatorIdChange: (value: string) => void;
   onPageChange: (page: number, pageSize: number) => void;
   onRangeChange: (range: [Dayjs | null, Dayjs | null] | null) => void;
+  onReset: () => void;
+  onSuccessChange: (success?: AuditSuccessFilter) => void;
 }) {
   return (
     <Space direction="vertical" size={16} className="detail-check-panel-body">
-      <div className="table-toolbar">
-        <Space className="expense-filters" wrap>
+      <div className="audit-filter-panel">
+        <Input.Search value={keyword} placeholder="搜索对象、操作者或备注" allowClear onChange={(event) => onKeywordSearch(event.target.value)} onSearch={onKeywordSearch} />
+        <Select allowClear showSearch optionFilterProp="label" placeholder="动作" value={action} options={systemAuditActionOptions} onChange={onActionChange} />
+        <Select allowClear placeholder="结果" value={success} options={auditSuccessOptions} onChange={onSuccessChange} />
+        <Input value={entityType} placeholder="对象类型" allowClear onChange={(event) => onEntityTypeChange(event.target.value)} />
+        <Input value={entityId} placeholder="对象ID" allowClear onChange={(event) => onEntityIdChange(event.target.value)} />
+        <Input value={operatorId} placeholder="操作者ID" allowClear onChange={(event) => onOperatorIdChange(event.target.value)} />
+        <Input value={actorEmail} placeholder="邮箱" allowClear onChange={(event) => onActorEmailChange(event.target.value)} />
+        <Space wrap>
           <DatePicker.RangePicker value={range} onChange={(value) => onRangeChange(value)} />
+          <Button onClick={onReset}>重置</Button>
         </Space>
       </div>
       <Table
@@ -1865,6 +2066,7 @@ function AuditLogsView({
         columns={auditLogColumns()}
         pagination={{ current: page, pageSize, total: data?.total ?? 0, onChange: onPageChange }}
         scroll={{ x: 980 }}
+        expandable={{ expandedRowRender: (record) => <AuditLogExpanded record={record} /> }}
       />
     </Space>
   );
@@ -1941,13 +2143,32 @@ function exceptionColumns(): ColumnsType<ExceptionAnalysisRow> {
 function auditLogColumns(): ColumnsType<AuditLogRecord> {
   return [
     { title: '时间', dataIndex: 'createdAt', width: 170, render: formatDateTime },
-    { title: '动作', dataIndex: 'action', width: 180 },
+    { title: '动作', dataIndex: 'action', width: 180, render: systemAuditActionName },
     { title: '对象', dataIndex: 'entityType', width: 120 },
     { title: '对象ID', dataIndex: 'entityId', width: 180, render: (value?: string | null) => value ?? '-' },
     { title: '操作者', width: 160, render: (_: unknown, record) => record.operator?.name ?? record.actorEmail ?? '-' },
     { title: '结果', dataIndex: 'success', width: 90, render: (value: boolean) => <Tag color={value ? 'success' : 'error'}>{value ? '成功' : '失败'}</Tag> },
     { title: '备注', dataIndex: 'comment', width: 220, render: (value?: string | null) => value ?? '-' },
   ];
+}
+
+function AuditLogExpanded({ record }: { record: AuditLogRecord }) {
+  return (
+    <div className="audit-log-expanded">
+      <AuditJsonBlock title="变更前" value={record.beforeData} />
+      <AuditJsonBlock title="变更后" value={record.afterData} />
+      <AuditJsonBlock title="元数据" value={record.metadata} />
+    </div>
+  );
+}
+
+function AuditJsonBlock({ title, value }: { title: string; value: unknown }) {
+  return (
+    <div className="audit-json-block">
+      <Text strong>{title}</Text>
+      <pre>{formatAuditJson(value)}</pre>
+    </div>
+  );
 }
 
 function MasterDataView({
@@ -4912,6 +5133,10 @@ function budgetControlModeName(mode: BudgetControlMode) {
   return mode === 'BLOCK' ? '超预算拦截' : '超预算提醒';
 }
 
+function systemAuditActionName(action: SystemAuditAction) {
+  return systemAuditActionOptions.find((option) => option.value === action)?.label ?? action;
+}
+
 function expenseTypeName(code?: string) {
   return expenseTypeOptions.find((option) => option.value === code)?.label ?? code ?? '-';
 }
@@ -5499,4 +5724,11 @@ function formatBps(value: number) {
 
 function formatDateTime(value?: string | null) {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-';
+}
+
+function formatAuditJson(value: unknown) {
+  if (value === undefined || value === null) {
+    return '-';
+  }
+  return JSON.stringify(value, null, 2);
 }
