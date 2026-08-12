@@ -9,4 +9,3 @@ npm.cmd run db:generate
 
 Write-Host 'Start backend with: npm.cmd run dev:backend'
 Write-Host 'Start frontend with: npm.cmd run dev:frontend'
-

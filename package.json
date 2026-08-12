@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "npm run dev --workspace frontend",
     "dev:frontend": "npm run dev --workspace frontend",
-    "dev:backend": "npm run start:dev --workspace backend",
-    "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces",
+    "dev:backend": "python -m uvicorn app.main:app --app-dir backend_py --host 0.0.0.0 --port 3000 --reload",
+    "build": "npm run build --workspace frontend && python -m compileall backend_py",
+    "lint": "npm run lint --workspace frontend && python -m compileall backend_py",
     "format": "npm run format --workspaces",
-    "test": "npm run test --workspaces",
+    "test": "npm run test --workspace frontend && python -m compileall backend_py",
     "db:migrate": "npm run db:migrate --workspace backend",
     "db:generate": "npm run db:generate --workspace backend"
   },

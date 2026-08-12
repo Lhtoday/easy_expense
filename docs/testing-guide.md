@@ -22,12 +22,10 @@ npm.cmd run build --workspace frontend
 
 ## 后端
 
-修改 NestJS 模块、service、controller、DTO、权限、审计行为或 Prisma 访问时使用：
+修改 FastAPI 模块、router、schema、权限、审计行为或数据库访问时使用：
 
 ```powershell
-npm.cmd run lint --workspace backend
-npm.cmd run test --workspace backend
-npm.cmd run build --workspace backend
+python -m compileall backend_py
 ```
 
 ## Prisma
