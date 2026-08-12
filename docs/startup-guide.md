@@ -1,6 +1,13 @@
 # ExpenseFlow 启动指南
 
-本文档记录本地启动 ExpenseFlow 项目的操作步骤。日常启动优先走“快速启动”；只有首次启动、Docker 未运行、依赖缺失或数据库结构变更时，才执行对应的准备步骤。
+本文记录本地启动 ExpenseFlow 的标准流程。当前项目形态是：
+
+- 前端：React + Vite，默认端口 `5173`
+- 后端：FastAPI，代码目录 `backend_py/`，默认端口 `3000`
+- 数据库结构：仍沿用 `backend/prisma/schema.prisma` 和既有 Prisma migrations 管理
+- 基础依赖：PostgreSQL、Redis、MinIO，由 `docker-compose.yml` 启动
+
+日常启动优先走“快速启动”。只有首次启动、依赖缺失、Docker 未运行、数据库结构变更或排查环境问题时，才执行准备步骤。
 
 ## 1. 进入项目目录
 
@@ -10,30 +17,30 @@ cd E:\codex\code\expense
 
 ## 2. 快速启动
 
-适用于 `node_modules` 已安装、Docker Desktop 已启动、数据库迁移已应用的日常开发场景。
+适用于 `node_modules` 和 `backend_py` Python 依赖已安装、Docker Desktop 已启动、数据库迁移已应用的日常开发场景。
 
-### 2.0 启动前快速检查
+### 2.1 检查本机状态
 
-需要先了解本机当前状态时，可运行：
+需要了解 Docker 服务和本项目相关进程时运行：
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File scripts\check-local.ps1
 ```
 
-该脚本会检查 Docker Compose 服务和本项目相关的本地进程。它是诊断辅助命令，不是启动前置条件；如果 Docker Desktop 未运行，可能先报 `failed to connect to the docker API`。如果当前 PowerShell 权限不足，也可能在读取 `Win32_Process` 时出现 `拒绝访问`，此时按下文分别检查 Docker 和服务健康状态即可。
+该脚本用于诊断当前状态，不是启动前强制步骤。如果 Docker Desktop 未运行，可能会先报 Docker API 连接失败。
 
-### 2.1 确认基础依赖
+### 2.2 启动基础依赖
 
 ```powershell
 docker-compose up -d postgres redis minio
 docker-compose ps
 ```
 
-`postgres`、`redis`、`minio` 都应显示为 `healthy` 或 `Up`。如果 Docker API 无法连接，先启动 Docker Desktop，等待 engine 就绪后再重试。
+`postgres`、`redis`、`minio` 应显示为 `healthy` 或 `Up`。如果 Docker API 无法连接，先启动 Docker Desktop，等待 engine 就绪后再重试。
 
-### 2.2 确认数据库状态
+### 2.3 确认数据库状态
 
-只启动项目时，不要优先运行 `prisma migrate dev`。该命令面向开发迁移创建，可能进入交互或长时间等待。
+Python 后端复用现有 PostgreSQL schema；schema 仍由 Prisma migrations 维护。日常启动不要优先运行 `prisma migrate dev`。
 
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
@@ -48,7 +55,7 @@ $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expensefl
 npm.cmd --workspace backend exec prisma migrate deploy
 ```
 
-### 2.3 启动后端
+### 2.4 启动 FastAPI 后端
 
 在一个 PowerShell 窗口中运行：
 
@@ -57,19 +64,37 @@ $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expensefl
 npm.cmd run dev:backend
 ```
 
-后端健康检查地址：
-
-```text
-http://localhost:3000/api/health
-```
-
-命令行验证：
+等后端启动后验证健康检查：
 
 ```powershell
 Invoke-RestMethod -Uri 'http://localhost:3000/api/health' -TimeoutSec 5
 ```
 
-### 2.4 启动前端
+正常返回应包含：
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "ok",
+    "service": "expenseflow-fastapi"
+  }
+}
+```
+
+如果 `3000` 端口已被占用，先确认进程归属：
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue |
+  Select-Object LocalAddress,LocalPort,OwningProcess
+
+Get-CimInstance Win32_Process -Filter "ProcessId = <PID>" |
+  Select-Object ProcessId,Name,CommandLine
+```
+
+旧 NestJS 后端如果仍在运行，常见命令行为 `backend\dist\main` 或 `nest start`。确认属于本项目且不再需要后，再停止对应进程。
+
+### 2.5 启动 React 前端
 
 另开一个 PowerShell 窗口运行：
 
@@ -78,7 +103,7 @@ cd E:\codex\code\expense
 npm.cmd run dev:frontend
 ```
 
-前端访问地址：
+前端地址：
 
 ```text
 http://localhost:5173
@@ -90,11 +115,48 @@ http://localhost:5173
 Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 5
 ```
 
-## 3. 后台启动方式
+## 3. 首次启动或依赖恢复
 
-如果需要让服务在当前终端外继续运行，可用隐藏 PowerShell 进程启动。该方式适合本地桌面环境和自动化助手；普通人工开发仍建议使用前台窗口，便于查看编译日志。
+### 3.1 安装 Node 依赖
 
-Codex Desktop 自动化启动时，后端和前端不要并行请求长期进程权限。推荐顺序是：先启动后端，等待并验证 `http://localhost:3000/api/health`；后端健康后再启动前端，并验证 `http://localhost:5173`。Docker 依赖已 healthy 时保持运行，不要为了重启前后端而重启 Docker 容器。
+```powershell
+npm.cmd install
+```
+
+### 3.2 安装 Python 后端依赖
+
+```powershell
+python -m pip install -r backend_py\requirements.txt
+```
+
+如果网络或权限受限，需要允许 pip 访问 Python 包索引。
+
+### 3.3 Docker Desktop 未启动
+
+如果出现类似错误：
+
+```text
+failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine
+failed to connect to the docker API at npipe:////./pipe/docker_engine
+```
+
+先启动 Docker Desktop：
+
+```powershell
+Start-Process -FilePath 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+```
+
+等待 20 到 30 秒后检查：
+
+```powershell
+docker ps
+docker-compose up -d postgres redis minio
+docker-compose ps
+```
+
+## 4. 后台启动方式
+
+普通开发建议使用前台窗口，方便查看日志。Codex Desktop 自动化场景如果需要服务在命令结束后继续运行，可以使用隐藏 PowerShell 进程。
 
 启动后端：
 
@@ -119,87 +181,36 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
 Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -ArgumentList '-NoProfile','-EncodedCommand',$encoded -WorkingDirectory 'E:\codex\code\expense' -WindowStyle Hidden
 ```
 
-检查进程：
+检查本项目相关进程：
 
 ```powershell
 Get-CimInstance Win32_Process |
-  Where-Object { ($_.Name -match 'node|npm|cmd|powershell') -and ($_.CommandLine -like '*E:\codex\code\expense*') } |
+  Where-Object { ($_.Name -match 'python|uvicorn|node|npm|cmd|powershell') -and ($_.CommandLine -like '*E:\codex\code\expense*') } |
   Select-Object ProcessId,Name,CommandLine
 ```
 
-停止本项目本地 dev 进程时，先用上面的命令确认 `ProcessId`，再停止对应进程：
+停止服务前，先确认 `ProcessId` 确实属于本项目，再执行：
 
 ```powershell
 Stop-Process -Id <ProcessId> -Force
 ```
 
-## 4. 首次或慢启动排查
+## 5. 登录信息
 
-### 4.1 安装依赖
-
-```powershell
-npm.cmd install
-```
-
-### 4.2 Docker Desktop 未启动
-
-如果出现类似以下报错，说明 Docker engine 尚未就绪：
-
-```text
-failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine
-failed to connect to the docker API at npipe:////./pipe/docker_engine
-WARNING: Error loading config file: open C:\Users\Administrator\.docker\config.json: Access is denied.
-```
-
-先启动 Docker Desktop：
-
-```powershell
-Start-Process -FilePath 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
-```
-
-等待 20 到 30 秒，再运行：
-
-```powershell
-docker ps
-docker-compose up -d postgres redis minio
-docker-compose ps
-```
-
-`docker ps` 能成功返回时，即使列表为空，也表示 Docker engine 已可访问。随后再启动本项目的 `postgres`、`redis` 和 `minio` 容器。
-
-### 4.3 数据库连接串
-
-当前本地 PostgreSQL 连接串：
-
-```powershell
-$env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
-```
-
-### 4.4 迁移命令选择
-
-- 日常启动：使用 `prisma migrate status` 检查状态。
-- 应用已有迁移：使用 `prisma migrate deploy`。
-- 创建或调整迁移：才使用 `prisma migrate dev`，并在前台终端运行。
-
-## 5. 登录信息和页面
-
-Phase 1 默认管理员会在首次登录时自动初始化：
+默认管理员会在首次登录时自动初始化：
 
 ```text
 邮箱：admin@expenseflow.local
 密码：Admin123!
 ```
 
-Phase 1 登录后可访问的基础管理页面：
+登录后可访问基础管理页面和已迁移的列表/配置页面。当前 Python 后端处于迁移阶段，部分财务状态流转写操作会返回：
 
-- 用户
-- 角色
-- 权限
-- 部门
-- 成本中心
-- 项目
+```text
+501 PYTHON_MIGRATION_PENDING
+```
 
-其中，系统管理员可以在“权限”页面查看全部权限；在“角色”页面编辑角色时，可以通过权限弹窗批量勾选权限。
+这是有意保护：未完整迁移状态机、预算影响和审计日志前，不允许这些动作伪成功。
 
 ## 6. MinIO 控制台
 
@@ -218,6 +229,31 @@ http://localhost:9001
 
 ## 7. 常用命令
 
+启动后端：
+
+```powershell
+$env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
+npm.cmd run dev:backend
+```
+
+启动前端：
+
+```powershell
+npm.cmd run dev:frontend
+```
+
+验证后端 Python 代码：
+
+```powershell
+python -m compileall backend_py
+```
+
+构建前端并验证后端：
+
+```powershell
+npm.cmd run build
+```
+
 生成 Prisma Client：
 
 ```powershell
@@ -232,19 +268,11 @@ npm.cmd --workspace backend exec prisma migrate status
 npm.cmd --workspace backend exec prisma migrate deploy
 ```
 
-创建或调整开发迁移：
+创建或调整开发迁移时才运行：
 
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
 npm.cmd --workspace backend exec prisma migrate dev
-```
-
-运行检查：
-
-```powershell
-npm.cmd run lint
-npm.cmd run test
-npm.cmd run build
 ```
 
 停止基础依赖：
@@ -253,12 +281,8 @@ npm.cmd run build
 docker-compose down
 ```
 
-## Windows 注意事项
+## 8. Windows 注意事项
 
-在当前机器的 PowerShell 中，建议使用 `npm.cmd`，不要直接使用 `npm`。直接运行 `npm` 可能会被 PowerShell 执行策略拦截 `npm.ps1`。
-
-如果由自动化助手启动长期运行的 dev server，需要使用外部隐藏 PowerShell 进程；沙箱内直接创建的后台子进程可能会在命令结束后被回收。
-
-## 登录状态排查
-
-如果前端页面在登录页和登录后页面之间反复跳转，通常是浏览器本地保存了已失效的 `expenseflow_token`。当前前端会在 `/auth/me` 校验失败时自动清理失效 token；如果浏览器仍显示旧状态，可以强制刷新页面，或清理 `http://localhost:5173` 的 localStorage 后重新登录。
+- 在 PowerShell 中使用 `npm.cmd`，不要直接使用 `npm`，避免执行策略拦截 `npm.ps1`。
+- 后端现在是 Python/FastAPI，启动失败时优先检查 `backend_py\requirements.txt` 是否已安装。
+- 如果前端登录页和登录后页面之间反复跳转，通常是浏览器保存了已失效的 `expenseflow_token`。强制刷新或清理 `http://localhost:5173` 的 localStorage 后重新登录。
