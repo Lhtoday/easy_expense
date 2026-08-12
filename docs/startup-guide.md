@@ -27,7 +27,7 @@ cd E:\codex\code\expense
 powershell.exe -ExecutionPolicy Bypass -File scripts\check-local.ps1
 ```
 
-该脚本用于诊断当前状态，不是启动前强制步骤。如果 Docker Desktop 未运行，可能会先报 Docker API 连接失败。
+该脚本用于诊断当前状态，不是启动前强制步骤。如果 Docker Desktop 未运行，可能会先报 Docker API 连接失败。如果当前 PowerShell 权限不足，也可能在读取 `Win32_Process` 时出现 `拒绝访问`；此时可以继续按下文分别用 `docker ps`、`docker-compose ps` 和端口检查命令确认服务状态。
 
 ### 2.2 启动基础依赖
 
@@ -36,7 +36,7 @@ docker-compose up -d postgres redis minio
 docker-compose ps
 ```
 
-`postgres`、`redis`、`minio` 应显示为 `healthy` 或 `Up`。如果 Docker API 无法连接，先启动 Docker Desktop，等待 engine 就绪后再重试。
+`postgres`、`redis`、`minio` 应显示为 `healthy` 或 `Up`。如果 Docker API 无法连接，先启动 Docker Desktop，等待 engine 就绪后再重试。若看到 `C:\Users\Administrator\.docker\config.json: Access is denied` 警告，但 `docker ps` 能正常返回容器列表，说明 engine 已可用，可以继续启动项目。
 
 ### 2.3 确认数据库状态
 
@@ -285,4 +285,5 @@ docker-compose down
 
 - 在 PowerShell 中使用 `npm.cmd`，不要直接使用 `npm`，避免执行策略拦截 `npm.ps1`。
 - 后端现在是 Python/FastAPI，启动失败时优先检查 `backend_py\requirements.txt` 是否已安装。
+- 本文档为 UTF-8 编码；Windows PowerShell 读取时如出现中文乱码，可使用 `Get-Content docs\startup-guide.md -Encoding UTF8`。
 - 如果前端登录页和登录后页面之间反复跳转，通常是浏览器保存了已失效的 `expenseflow_token`。强制刷新或清理 `http://localhost:5173` 的 localStorage 后重新登录。
