@@ -568,6 +568,36 @@ interface ReportDimensionRow {
   paidAmountCents: number;
 }
 
+type ReportDimension = 'department' | 'costCenter' | 'project';
+
+interface ReportDrilldownRow {
+  key: string;
+  dimensionKey: string;
+  dimensionCode: string;
+  dimensionName: string;
+  reportId: string;
+  reportNo: string;
+  reportTitle: string;
+  reportStatus: ExpenseStatus;
+  submittedAt?: string | null;
+  currency?: string | null;
+  itemId: string;
+  itemDescription: string;
+  occurredAt?: string | null;
+  expenseTypeCode?: string | null;
+  accountSubjectCode?: string | null;
+  amountCents: number;
+  taxAmountCents: number;
+  deductibleTaxCents: number;
+  reimbursableCents: number;
+  paidAmountCents: number;
+}
+
+interface ReportDrilldownSelection {
+  dimension: ReportDimension;
+  row: ReportDimensionRow;
+}
+
 interface BudgetExecutionRow extends BudgetRecord {
   usedCents: number;
   availableCents: number;
@@ -889,6 +919,9 @@ export function App() {
   const [tokenVersion, setTokenVersion] = useState(0);
   const [activeResource, setActiveResource] = useState<ResourceKey>('expense-reports');
   const [reportRange, setReportRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [reportDrilldown, setReportDrilldown] = useState<ReportDrilldownSelection | null>(null);
+  const [reportDrilldownPage, setReportDrilldownPage] = useState(1);
+  const [reportDrilldownPageSize, setReportDrilldownPageSize] = useState(10);
   const [auditRange, setAuditRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [auditKeyword, setAuditKeyword] = useState('');
   const [auditAction, setAuditAction] = useState<SystemAuditAction | undefined>();
@@ -1090,6 +1123,32 @@ export function App() {
       return response.data.data;
     },
     enabled: Boolean(me) && activeResource === 'reports',
+  });
+
+  const reportDrilldownQuery = useQuery<PageResult<ReportDrilldownRow>>({
+    queryKey: [
+      'reports-dimension-drilldown',
+      reportDrilldown?.dimension,
+      reportDrilldown?.row.key,
+      reportDrilldownPage,
+      reportDrilldownPageSize,
+      reportRange?.[0]?.format('YYYY-MM-DD'),
+      reportRange?.[1]?.format('YYYY-MM-DD'),
+    ],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<PageResult<ReportDrilldownRow>>>('/reports/dimension-drilldown', {
+        headers: authHeaders(),
+        params: {
+          dimension: reportDrilldown?.dimension,
+          key: reportDrilldown?.row.key,
+          page: reportDrilldownPage,
+          pageSize: reportDrilldownPageSize,
+          ...dateRangeParams(reportRange),
+        },
+      });
+      return response.data.data;
+    },
+    enabled: Boolean(me) && activeResource === 'reports' && Boolean(reportDrilldown),
   });
 
   const auditLogsQuery = useQuery<PageResult<AuditLogRecord>>({
@@ -1626,8 +1685,22 @@ export function App() {
           {activeResource === 'reports' ? (
             <ReportsDashboardView
               data={reportsDashboardQuery.data}
+              drilldown={reportDrilldown}
+              drilldownData={reportDrilldownQuery.data}
+              drilldownLoading={reportDrilldownQuery.isLoading}
+              drilldownPage={reportDrilldownPage}
+              drilldownPageSize={reportDrilldownPageSize}
               loading={reportsDashboardQuery.isLoading}
               range={reportRange}
+              onDrilldown={(dimension, row) => {
+                setReportDrilldown({ dimension, row });
+                setReportDrilldownPage(1);
+              }}
+              onDrilldownClose={() => setReportDrilldown(null)}
+              onDrilldownPageChange={(page, pageSize) => {
+                setReportDrilldownPage(page);
+                setReportDrilldownPageSize(pageSize);
+              }}
               onRangeChange={setReportRange}
             />
           ) : activeResource === 'audit-logs' ? (
@@ -1927,13 +2000,29 @@ export function App() {
 
 function ReportsDashboardView({
   data,
+  drilldown,
+  drilldownData,
+  drilldownLoading,
+  drilldownPage,
+  drilldownPageSize,
   loading,
   range,
+  onDrilldown,
+  onDrilldownClose,
+  onDrilldownPageChange,
   onRangeChange,
 }: {
   data?: ReportsDashboardRecord;
+  drilldown: ReportDrilldownSelection | null;
+  drilldownData?: PageResult<ReportDrilldownRow>;
+  drilldownLoading: boolean;
+  drilldownPage: number;
+  drilldownPageSize: number;
   loading: boolean;
   range: [Dayjs | null, Dayjs | null] | null;
+  onDrilldown: (dimension: ReportDimension, row: ReportDimensionRow) => void;
+  onDrilldownClose: () => void;
+  onDrilldownPageChange: (page: number, pageSize: number) => void;
   onRangeChange: (range: [Dayjs | null, Dayjs | null] | null) => void;
 }) {
   const statusRows = Object.entries(data?.summary.byStatus ?? {}).map(([status, value]) => ({ status, ...value }));
@@ -1955,15 +2044,15 @@ function ReportsDashboardView({
       <div className="report-grid">
         <section>
           <ReportSectionTitle title="部门费用" />
-          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byDepartment ?? []} columns={dimensionReportColumns()} pagination={false} scroll={{ x: 680 }} />
+          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byDepartment ?? []} columns={dimensionReportColumns('department', onDrilldown)} pagination={false} scroll={{ x: 760 }} />
         </section>
         <section>
           <ReportSectionTitle title="成本中心费用" />
-          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byCostCenter ?? []} columns={dimensionReportColumns()} pagination={false} scroll={{ x: 680 }} />
+          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byCostCenter ?? []} columns={dimensionReportColumns('costCenter', onDrilldown)} pagination={false} scroll={{ x: 760 }} />
         </section>
         <section>
           <ReportSectionTitle title="项目费用" />
-          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byProject ?? []} columns={dimensionReportColumns()} pagination={false} scroll={{ x: 680 }} />
+          <Table rowKey="key" size="small" loading={loading} dataSource={data?.byProject ?? []} columns={dimensionReportColumns('project', onDrilldown)} pagination={false} scroll={{ x: 760 }} />
         </section>
         <section>
           <ReportSectionTitle title="单据状态" />
@@ -1993,6 +2082,23 @@ function ReportsDashboardView({
           </Space>
         </section>
       </div>
+      <Modal
+        title={drilldown ? `${dimensionName(drilldown.dimension)}下钻 - ${drilldown.row.name}` : '报表下钻'}
+        open={Boolean(drilldown)}
+        footer={null}
+        onCancel={onDrilldownClose}
+        width={1120}
+      >
+        <Table
+          rowKey="key"
+          size="small"
+          loading={drilldownLoading}
+          dataSource={drilldownData?.items ?? []}
+          columns={reportDrilldownColumns()}
+          pagination={{ current: drilldownPage, pageSize: drilldownPageSize, total: drilldownData?.total ?? 0, showSizeChanger: true, onChange: onDrilldownPageChange }}
+          scroll={{ x: 1180 }}
+        />
+      </Modal>
     </Space>
   );
 }
@@ -2089,7 +2195,7 @@ function ReportSectionTitle({ title }: { title: string }) {
   );
 }
 
-function dimensionReportColumns(): ColumnsType<ReportDimensionRow> {
+function dimensionReportColumns(dimension: ReportDimension, onDrilldown: (dimension: ReportDimension, row: ReportDimensionRow) => void): ColumnsType<ReportDimensionRow> {
   return [
     { title: '编码', dataIndex: 'code', width: 110 },
     { title: '名称', dataIndex: 'name', width: 160 },
@@ -2098,7 +2204,37 @@ function dimensionReportColumns(): ColumnsType<ReportDimensionRow> {
     { title: '费用金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
     { title: '可报销', dataIndex: 'reimbursableCents', width: 120, align: 'right', render: formatMoney },
     { title: '已付', dataIndex: 'paidAmountCents', width: 120, align: 'right', render: formatMoney },
+    {
+      title: '操作',
+      width: 90,
+      fixed: 'right',
+      render: (_: unknown, row) => (
+        <Button size="small" icon={<EyeOutlined />} onClick={() => onDrilldown(dimension, row)}>
+          下钻
+        </Button>
+      ),
+    },
   ];
+}
+
+function reportDrilldownColumns(): ColumnsType<ReportDrilldownRow> {
+  return [
+    { title: '单号', dataIndex: 'reportNo', width: 150 },
+    { title: '标题', dataIndex: 'reportTitle', width: 180 },
+    { title: '状态', dataIndex: 'reportStatus', width: 120, render: (status: ExpenseStatus) => <ExpenseStatusTag status={status} /> },
+    { title: '提交时间', dataIndex: 'submittedAt', width: 160, render: formatDateTime },
+    { title: '发生日期', dataIndex: 'occurredAt', width: 120, render: (value?: string | null) => (value ? dayjs(value).format('YYYY-MM-DD') : '-') },
+    { title: '明细说明', dataIndex: 'itemDescription', width: 200 },
+    { title: '费用类型', dataIndex: 'expenseTypeCode', width: 110, render: (value?: string | null) => value ?? '-' },
+    { title: '科目', dataIndex: 'accountSubjectCode', width: 110, render: (value?: string | null) => value ?? '-' },
+    { title: '费用金额', dataIndex: 'amountCents', width: 120, align: 'right', render: formatMoney },
+    { title: '可报销', dataIndex: 'reimbursableCents', width: 120, align: 'right', render: formatMoney },
+    { title: '已付分摊', dataIndex: 'paidAmountCents', width: 120, align: 'right', render: formatMoney },
+  ];
+}
+
+function dimensionName(dimension: ReportDimension) {
+  return { department: '部门', costCenter: '成本中心', project: '项目' }[dimension];
 }
 
 function statusReportColumns(): ColumnsType<{ status: string; count: number; reimbursableCents: number }> {

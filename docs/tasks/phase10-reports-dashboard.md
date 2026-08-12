@@ -58,3 +58,11 @@
 - 前端 `审计日志` 页面新增高级筛选栏，支持按动作、结果、对象、操作者、邮箱、日期范围和关键字筛选。
 - 前端审计日志表格支持展开查看变更前、变更后和元数据 JSON。
 - 验证通过：后端 lint/build/test、前端 lint/build、后端健康检查、管理员登录、审计链路 keyword 筛选 API、动作+结果+对象类型筛选 API。
+
+## 2026-08-12 增量
+
+- Python 后端 `backend_py` 的 `GET /reports/dashboard` 补齐部门、成本中心、项目费用汇总，支持 `startDate` 和 `endDate` 按 `submitted_at` 过滤。
+- 新增 `GET /reports/dimension-drilldown`，支持 `department`、`costCenter`、`project` 三类维度下钻到报销单明细行。
+- 维度口径保持“明细行优先、单据头兜底”，报销统计排除 `DRAFT` 和 `VOIDED`；下钻的已付金额按明细可报销金额比例分摊。
+- 前端经营看板三张维度汇总表新增下钻按钮，弹窗展示对应报销单和明细金额。
+- 验证通过：`npm.cmd run lint`、`npm.cmd run build`、管理员登录、看板 API 和维度下钻 API smoke。

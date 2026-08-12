@@ -224,7 +224,8 @@
 - [x] `ReportsModule` 已导入 `IdentityModule`，修复 `CurrentUserGuard` 依赖 `AuthService` 的启动风险。
 - [x] 验证完成：后端健康检查、管理员登录、看板 API、审计链路 API、浏览器页面 smoke、后端 test/lint/build、前端 lint/build、Prisma migration status。
 - [x] 审计日志高级筛选：支持动作、对象类型、对象 ID、操作者 ID、操作者邮箱、成功/失败、日期范围和关键字筛选，并可展开查看 before/after/metadata 明细。
-- [ ] 后续细化：部门/项目/成本中心报表钻取、预算执行报表过滤、超标与发票异常专题报表、导出能力和单据明细跳转。
+- [x] 报表钻取首批：经营看板部门、成本中心、项目汇总返回真实维度数据，并支持下钻查看报销单和明细行。
+- [ ] 后续细化：预算执行报表过滤、超标与发票异常专题报表、导出能力和单据明细跳转。
 
 ## 工作流技能记录
 
@@ -299,3 +300,11 @@
 - 验证通过：后端 lint/build/test、前端 lint/build、后端健康检查、管理员登录、审计链路 keyword 筛选 API、动作+结果+对象类型筛选 API。
 - 当前状态：Phase 10 仍在进行中；审计高级查询已完成，下一步优先推进部门/项目/成本中心报表钻取、预算执行报表过滤、异常专题报表、导出能力和单据明细跳转。
 - 进度已提交并推送：`7b7498d` 已于 2026-08-11 推送到 `origin/main`，分支 `main`。
+
+## 2026-08-12 Phase 10 报表钻取首批增量
+
+- Python 后端 `backend_py` 的 `GET /reports/dashboard` 已补齐部门、成本中心、项目费用汇总，并按 `submitted_at` 支持 `startDate/endDate` 日期范围筛选；报销统计排除 `DRAFT` 和 `VOIDED`。
+- 新增 `GET /reports/dimension-drilldown` 只读接口，支持按 `department`、`costCenter`、`project` 和维度 key 下钻到报销单明细行；维度口径优先使用明细行维度，缺失时回退单据头维度，已付金额按明细可报销金额比例分摊。
+- 前端经营看板三张维度汇总表新增“下钻”操作，弹窗展示单号、标题、状态、提交时间、发生日期、明细说明、费用类型、科目、费用金额、可报销金额和已付分摊。
+- 验证通过：`npm.cmd run lint`、`npm.cmd run build`、管理员登录、`/api/reports/dashboard`、`/api/reports/dimension-drilldown` smoke；前端构建仍只有既有大 chunk 提示。
+- 当前状态：Phase 10 仍在进行中；报表钻取首批已完成，下一步优先推进预算执行报表过滤、异常专题报表、导出能力和单据明细跳转。
