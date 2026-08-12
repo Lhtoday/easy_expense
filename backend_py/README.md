@@ -1,6 +1,6 @@
 # ExpenseFlow FastAPI Backend
 
-This directory is the Python replacement for the original NestJS backend.
+This directory is the Python backend for ExpenseFlow.
 The migration keeps the existing PostgreSQL schema and the React API contract:
 
 - API prefix: `/api`
@@ -8,8 +8,7 @@ The migration keeps the existing PostgreSQL schema and the React API contract:
 - Error response: `{ "success": false, "error": { "code": "...", "message": "..." } }`
 - Default port: `3000`
 
-The legacy `backend/` directory is retained as the migration reference until all
-business modules have been verified against the Python implementation.
+The `backend/` directory now only retains Prisma schema and migration tooling.
 
 ## Local Setup
 
@@ -25,4 +24,3 @@ Health check:
 ```text
 http://localhost:3000/api/health
 ```
-

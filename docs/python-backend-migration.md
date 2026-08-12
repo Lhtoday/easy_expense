@@ -1,6 +1,6 @@
 # Python Backend Migration
 
-ExpenseFlow is migrating from `backend/` NestJS to `backend_py/` FastAPI while
+ExpenseFlow has moved the backend service from NestJS to `backend_py/` FastAPI while
 retaining the React frontend and the existing PostgreSQL schema.
 
 ## Current Migration Slice
@@ -38,6 +38,6 @@ transactions, budget effects, and audit records are fully ported.
 - Write audit logs in the same SQL transaction as migrated state-changing
   actions.
 - Do not mark guarded workflow actions as successful until budget, status, and
-  audit behavior matches the old NestJS service.
-- Retain `backend/` as a readable reference until parity is verified.
-
+  audit behavior has been fully ported and verified.
+- Keep `backend/` limited to Prisma schema and migrations until the data-model
+  toolchain is replaced.

@@ -11,8 +11,8 @@
     "lint": "npm run lint --workspace frontend && python -m compileall backend_py",
     "format": "npm run format --workspaces",
     "test": "npm run test --workspace frontend && python -m compileall backend_py",
-    "db:migrate": "npm run db:migrate --workspace backend",
-    "db:generate": "npm run db:generate --workspace backend"
+    "db:migrate": "npm run db:migrate --workspace schema",
+    "db:generate": "npm run db:generate --workspace schema"
   },
   "workspaces": [
     "frontend",

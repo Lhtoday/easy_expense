@@ -35,7 +35,7 @@ python -m compileall backend_py
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
 npm.cmd run db:generate
-npm.cmd --workspace backend exec prisma migrate status
+npm.cmd --workspace schema exec prisma migrate status
 ```
 
 仅在明确创建或调整开发 migration 时使用 `prisma migrate dev`。

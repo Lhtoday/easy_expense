@@ -45,14 +45,14 @@ Python 后端复用现有 PostgreSQL schema；schema 仍由 Prisma migrations �
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
 npm.cmd run db:generate
-npm.cmd --workspace backend exec prisma migrate status
+npm.cmd --workspace schema exec prisma migrate status
 ```
 
 如果 `migrate status` 显示数据库不是最新，再应用已有迁移：
 
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
-npm.cmd --workspace backend exec prisma migrate deploy
+npm.cmd --workspace schema exec prisma migrate deploy
 ```
 
 ### 2.4 启动 FastAPI 后端
@@ -92,7 +92,7 @@ Get-CimInstance Win32_Process -Filter "ProcessId = <PID>" |
   Select-Object ProcessId,Name,CommandLine
 ```
 
-旧 NestJS 后端如果仍在运行，常见命令行为 `backend\dist\main` 或 `nest start`。确认属于本项目且不再需要后，再停止对应进程。
+如果旧 NestJS 后端进程仍在运行，常见命令行为 `backend\dist\main` 或 `nest start`。确认属于本项目且不再需要后，再停止对应进程；当前仓库中的后端服务入口已迁移到 `backend_py/`。
 
 ### 2.5 启动 React 前端
 
@@ -264,15 +264,15 @@ npm.cmd run db:generate
 
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
-npm.cmd --workspace backend exec prisma migrate status
-npm.cmd --workspace backend exec prisma migrate deploy
+npm.cmd --workspace schema exec prisma migrate status
+npm.cmd --workspace schema exec prisma migrate deploy
 ```
 
 创建或调整开发迁移时才运行：
 
 ```powershell
 $env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
-npm.cmd --workspace backend exec prisma migrate dev
+npm.cmd --workspace schema exec prisma migrate dev
 ```
 
 停止基础依赖：

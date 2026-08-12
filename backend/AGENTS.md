@@ -1,71 +1,40 @@
-# ExpenseFlow Backend Rules
+# ExpenseFlow Backend Schema Rules
 
-本文件用于约束后端开发。当前端目录内还有更深层级的 `AGENTS.md` 时，以更靠近代码的规则为准。
+当前 `backend/` 目录不再包含 NestJS/TypeScript 后端服务代码。
 
-后端开发还必须遵守 `backend/docs/backend-conventions.md` 中的目录结构、SQL、删除策略和命名前缀约定。
+本目录只保留数据库模型工具链：
 
-## Stack
+- `backend/prisma/schema.prisma`
+- `backend/prisma/migrations/`
+- `backend/package.json` 中的 Prisma 命令
 
-- NestJS + TypeScript
-- PostgreSQL
-- Prisma
-- Redis + BullMQ
-- MinIO
-- Docker Compose + Nginx
+实际后端服务代码位于 `backend_py/`，使用 FastAPI。
 
-## Architecture Rules
+## Scope
 
-- 业务逻辑应放在服务层或领域层，控制器只负责参数解析、鉴权入口和响应组织。
-- 模块边界应围绕业务资源组织，例如报销单、发票、预算、审批、付款、凭证、权限。
-- 审批流、会计科目映射、预算规则不得写成不可配置的条件分支。
-- 所有跨模块副作用应通过事务、领域事件或明确的服务编排处理。
-- 新增依赖前先确认是否真的降低复杂度，并优先采用成熟稳定的库。
+- 修改数据库模型、枚举、索引、约束或 migration 时，遵守本文件。
+- 修改 HTTP API、鉴权、业务状态机、审计写入或服务端业务逻辑时，前往 `backend_py/`。
+- React 前端仍位于 `frontend/`，保持 TypeScript/Vite 技术栈。
 
-## Data Model Rules
+## Prisma Rules
 
-- 关键业务表建议包含 `id`、`created_at`、`updated_at`、`created_by`、`updated_by`、`deleted_at` 或等价字段。
-- 重要业务编号应使用独立单号字段，不使用数据库主键作为业务单号。
-- 金额字段命名必须清晰，例如 `amount`、`tax_amount`、`reimbursable_amount`、`paid_amount`。
-- 任何金额、税额、预算、付款、凭证相关逻辑都必须避免浮点数计算，统一使用定点数或最小货币单位。
-- 枚举值应集中定义，禁止在多个模块里散落硬编码字符串。
-- 附件和发票文件只保存元数据与存储引用，不直接把大文件存入业务表。
-- 所有状态字段必须有明确状态机，不允许任意跳转。
+- 不要运行 `prisma migrate dev`，除非明确是在创建或调整开发迁移。
+- 日常检查使用：
 
-## API Rules
+```powershell
+$env:DATABASE_URL='postgresql://expenseflow:expenseflow@localhost:5432/expenseflow?schema=public'
+npm.cmd run db:generate
+npm.cmd --workspace schema exec prisma migrate status
+```
 
-- API 应按业务资源组织，例如 `/expense-reports`、`/invoices`、`/budgets`、`/approvals`、`/payments`。
-- 写操作必须校验当前用户权限、单据状态和业务规则。
-- 涉及金额、付款、凭证、预算占用的接口必须具备幂等设计。
-- 列表接口必须支持分页、排序和常用筛选条件。
-- 返回给前端的错误信息应能指导用户修正问题，但不能泄露敏感内部信息。
-- 外部系统回调必须校验签名、来源和幂等键。
+- 金额、税额、预算、付款和凭证相关字段必须继续使用整数分单位或其他定点表示。
+- 状态、权限和审计枚举属于前后端契约，变更时必须同步检查 `backend_py/` 与 `frontend/`。
+- 不要删除表或字段，除非有明确数据迁移方案和用户确认。
+- 新增核心业务模型时，同步更新领域文档、启动/测试文档和 FastAPI 访问层。
 
-## Workflow Rules
+## Data And Audit Guardrails
 
-- 审批节点至少应支持通过、驳回、撤回、转审、加签、作废和备注。
-- 金额、部门、成本中心、项目、费用类型和是否超预算都可以影响审批路径。
-- 审批动作必须在事务内完成状态更新、任务更新、审计日志和必要的预算处理。
-- 付款动作只能在财务审核通过后执行，并需要独立权限。
-
-## Accounting And Budget Rules
-
-- 预算控制必须覆盖占用、释放、超预算、审批失败回滚和并发提交。
-- 发票重复校验至少基于发票代码、发票号码、开票日期、金额和销方信息。
-- 会计凭证应先生成草稿，不直接过账。
-- 员工借款冲销、固定资产确认、资本化支出等特殊场景需要明确财务规则。
-
-## File And Async Rules
-
-- MinIO 用于发票、附件、电子影像等对象存储，不把大文件直接写入业务表。
-- 附件下载必须经过后端鉴权后生成临时访问地址。
-- Redis 和 BullMQ 用于异步任务、通知、OCR、发票验真、凭证生成等后台流程。
-- 异步任务必须支持重试、幂等和失败记录。
-
-## Testing Rules
-
-- 金额计算必须覆盖小数、四舍五入、税额拆分和多币种扩展场景。
-- 状态机测试必须覆盖正常流转、非法跳转、驳回、撤回、作废和重复提交。
-- 预算测试必须覆盖占用、释放、超预算、并发提交和审批失败回滚。
-- 权限测试必须覆盖跨部门访问、越权审批、越权付款和敏感配置变更。
-- 发票测试必须覆盖重复发票、金额不一致、抬头错误和附件缺失。
-- 关键接口应有集成测试，核心财务规则应有单元测试。
+- 关键业务表保留 `id`、`created_at`、`updated_at`、`deleted_at` 或等价生命周期字段。
+- 业务编号使用独立单号字段，不使用数据库主键作为业务单号。
+- 审计表保持追加写入，除非领域文档明确允许清理或归档。
+- 发票重复校验、预算占用、付款、凭证草稿和权限控制相关索引不得随意移除。
