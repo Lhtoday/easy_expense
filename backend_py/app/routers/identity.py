@@ -195,8 +195,8 @@ def user_roles(db: Session, user_id: str) -> list[dict]:
 
 
 def role_permissions(db: Session, role_id: str) -> list[dict]:
-    rows = db.execute(select(table("iam_permissions").c.code, table("iam_permissions").c.name).select_from(table("iam_role_permissions").join(table("iam_permissions"), table("iam_role_permissions").c.permission_id == table("iam_permissions").c.id)).where(table("iam_role_permissions").c.role_id == role_id)).all()
-    return [row_to_dict(row) for row in rows]
+    rows = db.execute(select(table("iam_permissions").c.id, table("iam_permissions").c.code, table("iam_permissions").c.name).select_from(table("iam_role_permissions").join(table("iam_permissions"), table("iam_role_permissions").c.permission_id == table("iam_permissions").c.id)).where(table("iam_role_permissions").c.role_id == role_id)).all()
+    return [{"permission": row_to_dict(row)} for row in rows]
 
 
 def replace_user_roles(db: Session, user_id: str, role_ids: list[str]) -> None:

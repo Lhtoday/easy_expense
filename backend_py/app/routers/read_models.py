@@ -73,9 +73,51 @@ def report_detail(report_id: str, user: CurrentUser = Depends(require_current_us
 def dashboard(user: CurrentUser = Depends(require_current_user), db: Session = Depends(get_db)):
     require_permission(user, "report:dashboard:read")
     reports = table("exp_reports")
-    total_reports = db.execute(select(func.count()).select_from(reports).where(reports.c.deleted_at.is_(None))).scalar_one()
-    total_amount = db.execute(select(func.coalesce(func.sum(reports.c.reimbursable_cents), 0)).where(reports.c.deleted_at.is_(None))).scalar_one()
-    return {"success": True, "data": {"totalReports": total_reports, "totalReimbursableCents": int(total_amount), "statusSummary": []}}
+    active_reports = reports.c.deleted_at.is_(None)
+    report_summary = db.execute(
+        select(
+            func.count().label("report_count"),
+            func.coalesce(func.sum(reports.c.reimbursable_cents), 0).label("reimbursable_cents"),
+            func.coalesce(func.sum(reports.c.paid_amount_cents), 0).label("paid_amount_cents"),
+        ).where(active_reports)
+    ).first()
+    status_rows = db.execute(
+        select(
+            reports.c.status,
+            func.count().label("count"),
+            func.coalesce(func.sum(reports.c.reimbursable_cents), 0).label("reimbursable_cents"),
+        )
+        .where(active_reports)
+        .group_by(reports.c.status)
+    ).all()
+    by_status = {status: {"count": int(count), "reimbursableCents": int(reimbursable_cents)} for status, count, reimbursable_cents in status_rows}
+
+    vouchers = table("gl_vouchers")
+    voucher_confirmed_count = db.execute(
+        select(func.count()).select_from(vouchers).where(vouchers.c.status == "CONFIRMED")
+    ).scalar_one()
+    audit_count = db.execute(select(func.count()).select_from(table("sys_audit_logs"))).scalar_one()
+
+    reimbursable_cents = int(report_summary.reimbursable_cents or 0)
+    paid_amount_cents = int(report_summary.paid_amount_cents or 0)
+    data = {
+        "summary": {
+            "reportCount": int(report_summary.report_count or 0),
+            "reimbursableCents": reimbursable_cents,
+            "paidAmountCents": paid_amount_cents,
+            "pendingPaymentCents": max(reimbursable_cents - paid_amount_cents, 0),
+            "voucherConfirmedCount": int(voucher_confirmed_count or 0),
+            "auditCount": int(audit_count or 0),
+            "byStatus": by_status,
+        },
+        "byDepartment": [],
+        "byCostCenter": [],
+        "byProject": [],
+        "budgetExecution": budget_execution(db),
+        "approvalLatency": [],
+        "exceptions": exception_summary(db),
+    }
+    return {"success": True, "data": data}
 
 
 @router.get("/reports/audit-chain")
@@ -109,3 +151,78 @@ def hydrate_report(db: Session, report: dict, detail: bool = False) -> dict:
         report["budgetChecks"] = child_rows(db, "bud_checks", report_id)
         report["budgetOccupations"] = child_rows(db, "bud_occupations", report_id)
     return report
+
+
+def budget_execution(db: Session) -> list[dict]:
+    budgets = table("bud_budgets")
+    rows = db.execute(
+        select(
+            budgets.c.id,
+            budgets.c.code,
+            budgets.c.name,
+            budgets.c.fiscal_period,
+            budgets.c.department_id,
+            budgets.c.cost_center_id,
+            budgets.c.project_id,
+            budgets.c.expense_type_code,
+            budgets.c.account_subject_code,
+            budgets.c.currency,
+            budgets.c.total_cents,
+            budgets.c.in_transit_cents,
+            budgets.c.approved_cents,
+            budgets.c.actual_cents,
+            budgets.c.warning_threshold_bps,
+            budgets.c.control_mode,
+            budgets.c.status,
+            budgets.c.created_at,
+        )
+        .where(budgets.c.deleted_at.is_(None))
+        .order_by(budgets.c.fiscal_period.desc(), budgets.c.code.asc())
+        .limit(20)
+    ).all()
+    items = []
+    for row in rows:
+        item = row_to_dict(row)
+        used_cents = int(item.get("inTransitCents") or 0) + int(item.get("approvedCents") or 0) + int(item.get("actualCents") or 0)
+        total_cents = int(item.get("totalCents") or 0)
+        item["usedCents"] = used_cents
+        item["availableCents"] = max(total_cents - used_cents, 0)
+        item["executionBps"] = int(used_cents * 10000 / total_cents) if total_cents else 0
+        items.append(item)
+    return items
+
+
+def exception_summary(db: Session) -> dict:
+    invoices = table("exp_invoices")
+    duplicate_count, duplicate_amount = db.execute(
+        select(func.count(), func.coalesce(func.sum(invoices.c.total_amount_cents), 0)).where(
+            invoices.c.deleted_at.is_(None),
+            invoices.c.duplicate_status == "DUPLICATE",
+        )
+    ).first()
+    unlinked_count, unlinked_amount = db.execute(
+        select(func.count(), func.coalesce(func.sum(invoices.c.total_amount_cents), 0)).where(
+            invoices.c.deleted_at.is_(None),
+            invoices.c.item_id.is_(None),
+        )
+    ).first()
+    return {
+        "policy": grouped_exceptions(db, "exp_policy_checks", ["WARNING", "BLOCK", "ESCALATE"]),
+        "budget": grouped_exceptions(db, "bud_checks", ["WARNING", "BLOCK"]),
+        "duplicateInvoiceCount": int(duplicate_count or 0),
+        "duplicateInvoiceAmountCents": int(duplicate_amount or 0),
+        "unlinkedInvoiceCount": int(unlinked_count or 0),
+        "unlinkedInvoiceAmountCents": int(unlinked_amount or 0),
+    }
+
+
+def grouped_exceptions(db: Session, table_name: str, results: list[str]) -> list[dict]:
+    model = table(table_name)
+    rows = db.execute(
+        select(model.c.result, model.c.message, func.count().label("count"))
+        .where(model.c.result.in_(results))
+        .group_by(model.c.result, model.c.message)
+        .order_by(func.count().desc())
+        .limit(10)
+    ).all()
+    return [{"result": result, "message": message, "count": int(count)} for result, message, count in rows]

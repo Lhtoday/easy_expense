@@ -221,6 +221,46 @@ def find_row(db: Session, model, item_id: str, columns: list[str]) -> dict:
     return row_to_dict(row)
 
 
+def hydrate_items(resource: str, db: Session, items: list[dict]) -> list[dict]:
+    if resource != "expense-policies":
+        return items
+    return hydrate_policy_rules(db, items)
+
+
+def hydrate_policy_rules(db: Session, policies: list[dict]) -> list[dict]:
+    if not policies:
+        return policies
+    policy_ids = [policy["id"] for policy in policies]
+    rules = table("exp_policy_rules")
+    rows = db.execute(
+        select(
+            rules.c.id,
+            rules.c.policy_id,
+            rules.c.code,
+            rules.c.name,
+            rules.c.description,
+            rules.c.expense_type_code,
+            rules.c.city,
+            rules.c.job_level,
+            rules.c.max_amount_cents,
+            rules.c.requires_invoice,
+            rules.c.requires_pre_approval,
+            rules.c.action,
+            rules.c.status,
+            rules.c.created_at,
+        )
+        .where(rules.c.policy_id.in_(policy_ids))
+        .order_by(rules.c.code.asc())
+    ).all()
+    rules_by_policy = {policy_id: [] for policy_id in policy_ids}
+    for row in rows:
+        rule = row_to_dict(row)
+        rules_by_policy.setdefault(rule["policyId"], []).append(rule)
+    for policy in policies:
+        policy["rules"] = rules_by_policy.get(policy["id"], [])
+    return policies
+
+
 def add_crud_routes(router: APIRouter, resource: str, config: dict) -> None:
     @router.get(f"/{resource}")
     def list_items(
@@ -250,6 +290,7 @@ def add_crud_routes(router: APIRouter, resource: str, config: dict) -> None:
             item_query = item_query.order_by(model.c.created_at.desc())
         total = db.execute(count_query).scalar_one()
         items = [row_to_dict(row) for row in db.execute(item_query).all()]
+        items = hydrate_items(resource, db, items)
         return {"success": True, "data": page_result(items, page, pageSize, total)}
 
     @router.post(f"/{resource}")
@@ -265,7 +306,7 @@ def add_crud_routes(router: APIRouter, resource: str, config: dict) -> None:
         if "updated_at" in model.c:
             values["updated_at"] = datetime.utcnow()
         row = db.execute(model.insert().values(**values).returning(*select_columns(model, config["columns"]))).first()
-        item = row_to_dict(row)
+        item = hydrate_items(resource, db, [row_to_dict(row)])[0]
         if config["audit"].get("create"):
             record_audit(db, operator=user, action=config["audit"]["create"], entity_type=config["audit_entity"], entity_id=item["id"], after=item)
         db.commit()
@@ -280,7 +321,7 @@ def add_crud_routes(router: APIRouter, resource: str, config: dict) -> None:
         if "updated_at" in model.c:
             values["updated_at"] = datetime.utcnow()
         row = db.execute(model.update().where(model.c.id == item_id).values(**values).returning(*select_columns(model, config["columns"]))).first()
-        item = row_to_dict(row)
+        item = hydrate_items(resource, db, [row_to_dict(row)])[0]
         if config["audit"].get("update"):
             record_audit(db, operator=user, action=config["audit"]["update"], entity_type=config["audit_entity"], entity_id=item_id, before=before, after=item)
         db.commit()
@@ -297,7 +338,7 @@ def add_crud_routes(router: APIRouter, resource: str, config: dict) -> None:
             row = db.execute(model.update().where(model.c.id == item_id).values(status="DISABLED").returning(*select_columns(model, config["columns"]))).first()
         else:
             row = db.execute(model.delete().where(model.c.id == item_id).returning(*select_columns(model, config["columns"]))).first()
-        item = row_to_dict(row)
+        item = hydrate_items(resource, db, [row_to_dict(row)])[0]
         if config["audit"].get("delete"):
             record_audit(db, operator=user, action=config["audit"]["delete"], entity_type=config["audit_entity"], entity_id=item_id, before=before, after=item)
         db.commit()
