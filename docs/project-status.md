@@ -308,3 +308,4 @@
 - 前端经营看板三张维度汇总表新增“下钻”操作，弹窗展示单号、标题、状态、提交时间、发生日期、明细说明、费用类型、科目、费用金额、可报销金额和已付分摊。
 - 验证通过：`npm.cmd run lint`、`npm.cmd run build`、管理员登录、`/api/reports/dashboard`、`/api/reports/dimension-drilldown` smoke；前端构建仍只有既有大 chunk 提示。
 - 当前状态：Phase 10 仍在进行中；报表钻取首批已完成，下一步优先推进预算执行报表过滤、异常专题报表、导出能力和单据明细跳转。
+- 进度已提交并推送：`e9b9407` 已于 2026-08-12 推送到 `origin/main`，分支 `main`。
